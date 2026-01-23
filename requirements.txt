@@ -1,0 +1,29 @@
+# Bot Trade Backend Dependencies
+
+# API Framework
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+websockets==12.0
+
+# MQTT Client for DNSE
+paho-mqtt==2.0.0
+
+# Data Processing
+pandas==2.2.0
+numpy==1.26.3
+
+# Database
+aiosqlite==0.19.0
+
+# Configuration
+python-dotenv==1.0.0
+pydantic==2.5.3
+pydantic-settings==2.1.0
+
+# Async support
+httpx==0.26.0
+
+# Testing
+pytest==7.4.4
+pytest-asyncio==0.23.3
+pytest-cov==4.1.0
