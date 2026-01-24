@@ -4,7 +4,21 @@ RSI, MACD, ATR implementations
 """
 from typing import List, Optional, Tuple
 from dataclasses import dataclass
-import numpy as np
+import math
+
+# Lightweight numpy-free implementations for indicators to avoid heavy native deps
+
+def _mean(values: List[float]) -> float:
+    return sum(values) / len(values) if values else 0.0
+
+def _diff(values: List[float]) -> List[float]:
+    return [values[i+1] - values[i] for i in range(len(values)-1)]
+
+def _where_positive(values: List[float]) -> List[float]:
+    return [v if v > 0 else 0.0 for v in values]
+
+def _where_negative_abs(values: List[float]) -> List[float]:
+    return [(-v) if v < 0 else 0.0 for v in values]
 
 from .models import Bar, IndicatorValues
 
@@ -24,15 +38,15 @@ def calculate_rsi(closes: List[float], period: int = 14) -> Optional[float]:
         return None
     
     # Calculate price changes
-    deltas = np.diff(closes)
+    deltas = _diff(closes)
     
     # Separate gains and losses
-    gains = np.where(deltas > 0, deltas, 0)
-    losses = np.where(deltas < 0, -deltas, 0)
+    gains = _where_positive(deltas)
+    losses = _where_negative_abs(deltas)
     
     # Calculate average gains and losses using EMA
-    avg_gain = np.mean(gains[-period:])
-    avg_loss = np.mean(losses[-period:])
+    avg_gain = _mean(gains[-period:])
+    avg_loss = _mean(losses[-period:])
     
     if avg_loss == 0:
         return 100.0
@@ -55,13 +69,13 @@ def calculate_rsi_series(closes: List[float], period: int = 14) -> List[Optional
     if len(closes) < period + 1:
         return result
     
-    deltas = np.diff(closes)
-    gains = np.where(deltas > 0, deltas, 0)
-    losses = np.where(deltas < 0, -deltas, 0)
+    deltas = _diff(closes)
+    gains = _where_positive(deltas)
+    losses = _where_negative_abs(deltas)
     
     # Initial SMA
-    avg_gain = np.mean(gains[:period])
-    avg_loss = np.mean(losses[:period])
+    avg_gain = _mean(gains[:period])
+    avg_loss = _mean(losses[:period])
     
     for i in range(period, len(closes)):
         if avg_loss == 0:
@@ -90,13 +104,13 @@ def calculate_ema(values: List[float], period: int) -> List[float]:
     """Calculate Exponential Moving Average."""
     if len(values) < period:
         return []
-    
+
     multiplier = 2 / (period + 1)
-    ema = [np.mean(values[:period])]  # Start with SMA
-    
+    ema = [_mean(values[:period])]  # Start with SMA
+
     for i in range(period, len(values)):
         ema.append(values[i] * multiplier + ema[-1] * (1 - multiplier))
-    
+
     return ema
 
 
@@ -226,7 +240,7 @@ def calculate_atr(bars: List[Bar], period: int = 14) -> Optional[float]:
         true_ranges.append(tr)
     
     # Use simple average for ATR
-    atr = np.mean(true_ranges[-period:])
+    atr = _mean(true_ranges[-period:])
     return float(atr)
 
 
@@ -253,7 +267,7 @@ def calculate_atr_series(bars: List[Bar], period: int = 14) -> List[Optional[flo
     # Calculate ATR using SMA then EMA
     for i in range(period, len(bars)):
         if i == period:
-            result[i] = float(np.mean(true_ranges[:period]))
+            result[i] = float(_mean(true_ranges[:period]))
         else:
             # Wilder's smoothing
             prev_atr = result[i - 1]

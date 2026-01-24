@@ -30,3 +30,25 @@ htmlcov/
 
 # Logs
 *.log
+
+# Virtualenv
+.venv/
+
+# Windows/Python installers and tools
+python-*.exe
+rustup-init.exe
+
+# Node
+node_modules/
+**/node_modules/
+dist/
+
+# VSCode workspace
+.vscode/
+
+# Ignore local DB
+bottrade.db
+
+# Ignore build artifacts
+*.pyc
+*.pyo

@@ -1,0 +1,286 @@
+@import 'tailwindcss/base';
+@import 'tailwindcss/components';
+@import 'tailwindcss/utilities';
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Colors */
+  --color-success: #10B981;
+  --color-danger: #EF4444;
+  --color-warning: #F59E0B;
+  --color-info: #3B82F6;
+  
+  /* Backgrounds */
+  --bg-primary: #0F172A;
+  --bg-secondary: #1E293B;
+  --bg-tertiary: #334155;
+  
+  /* Text */
+  --text-primary: #F1F5F9;
+  --text-secondary: #CBD5E1;
+  --text-tertiary: #94A3B8;
+  
+  /* Borders */
+  --border-primary: #1E293B;
+  --border-secondary: #475569;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  @apply bg-gray-950 text-gray-100 font-sans;
+  font-family: Inter, system-ui, -apple-system, sans-serif;
+}
+
+/* Typography */
+h1 {
+  @apply text-3xl font-bold text-white;
+}
+
+h2 {
+  @apply text-2xl font-bold text-white;
+}
+
+h3 {
+  @apply text-xl font-bold text-white;
+}
+
+p {
+  @apply text-gray-400;
+}
+
+/* Links */
+a {
+  @apply text-green-400 hover:text-green-300 transition-colors;
+}
+
+/* Tables */
+table {
+  @apply w-full border-collapse;
+}
+
+thead {
+  @apply bg-gray-800/50;
+}
+
+td, th {
+  @apply px-4 py-3 text-left border-b border-gray-700;
+}
+
+/* Forms */
+input,
+textarea,
+select {
+  @apply bg-gray-700 border border-gray-600 rounded text-white px-3 py-2 focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500/30 transition;
+}
+
+input::placeholder {
+  @apply text-gray-500;
+}
+
+input:disabled,
+textarea:disabled,
+select:disabled {
+  @apply bg-gray-800 text-gray-500 cursor-not-allowed;
+}
+
+/* Buttons */
+button {
+  @apply transition-colors duration-200;
+}
+
+.btn-primary {
+  @apply px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded font-medium;
+}
+
+.btn-secondary {
+  @apply px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded font-medium;
+}
+
+.btn-danger {
+  @apply px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded font-medium;
+}
+
+.btn-small {
+  @apply px-3 py-1 text-sm;
+}
+
+/* Cards */
+.card {
+  @apply bg-gray-800 rounded-lg border border-gray-700 p-4;
+}
+
+.card-title {
+  @apply text-lg font-bold text-white mb-4;
+}
+
+/* Badges */
+.badge {
+  @apply inline-block px-2 py-1 text-xs rounded font-semibold;
+}
+
+.badge-success {
+  @apply bg-green-900/30 text-green-400 border border-green-700;
+}
+
+.badge-danger {
+  @apply bg-red-900/30 text-red-400 border border-red-700;
+}
+
+.badge-warning {
+  @apply bg-yellow-900/30 text-yellow-400 border border-yellow-700;
+}
+
+.badge-info {
+  @apply bg-blue-900/30 text-blue-400 border border-blue-700;
+}
+
+/* Status Indicators */
+.status-indicator {
+  @apply inline-block w-3 h-3 rounded-full;
+}
+
+.status-online {
+  @apply bg-green-500;
+}
+
+.status-offline {
+  @apply bg-red-500;
+}
+
+.status-idle {
+  @apply bg-yellow-500;
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideInUp {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.fade-in {
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+.slide-in-up {
+  animation: slideInUp 0.3s ease-in-out;
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-gray-900;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-gray-700 hover:bg-gray-600 rounded-full;
+}
+
+/* Utility Classes */
+.text-balance {
+  text-wrap: balance;
+}
+
+.flex-center {
+  @apply flex items-center justify-center;
+}
+
+.grid-auto {
+  @apply grid gap-4 auto-rows-max;
+}
+
+.divider {
+  @apply border-t border-gray-700;
+}
+
+.shadow-lg-custom {
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+}
+
+/* Responsive Utilities */
+@media (max-width: 768px) {
+  h1 {
+    @apply text-2xl;
+  }
+
+  h2 {
+    @apply text-xl;
+  }
+
+  h3 {
+    @apply text-lg;
+  }
+}
+
+/* Dark Mode (already default) */
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg-primary: #FFFFFF;
+    --bg-secondary: #F8FAFC;
+    --text-primary: #0F172A;
+    --text-secondary: #334155;
+    --text-tertiary: #64748B;
+  }
+
+  body {
+    @apply bg-white text-gray-900;
+  }
+
+  input,
+  textarea,
+  select {
+    @apply bg-gray-100 border-gray-300 text-gray-900;
+  }
+
+  .card {
+    @apply bg-gray-50 border-gray-200;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-gray-100;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-gray-300 hover:bg-gray-400;
+  }
+}
+
+/* Print Styles */
+@media print {
+  body {
+    @apply bg-white text-black;
+  }
+
+  .no-print {
+    @apply hidden;
+  }
+}

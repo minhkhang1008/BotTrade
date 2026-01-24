@@ -1,0 +1,100 @@
+@import 'tailwindcss/base';
+@import 'tailwindcss/components';
+@import 'tailwindcss/utilities';
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Colors */
+  --color-success: #10B981;
+  --color-danger: #EF4444;
+  --color-warning: #F59E0B;
+  --color-info: #3B82F6;
+  
+  /* Backgrounds */
+  --bg-primary: #0F172A;
+  --bg-secondary: #1E293B;
+  --bg-tertiary: #334155;
+  
+  /* Text */
+  --text-primary: #F1F5F9;
+  --text-secondary: #CBD5E1;
+  --text-tertiary: #94A3B8;
+  
+  /* Borders */
+  --border-primary: #1E293B;
+  --border-secondary: #475569;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  @apply bg-gray-950 text-gray-100 font-sans;
+  font-family: Inter, system-ui, -apple-system, sans-serif;
+}
+
+/* Typography */
+h1 {
+  @apply text-3xl font-bold text-white;
+}
+
+h2 {
+  @apply text-2xl font-bold text-white;
+}
+
+h3 {
+  @apply text-xl font-bold text-white;
+}
+
+p {
+  @apply text-gray-400;
+}
+
+/* Links */
+a {
+  @apply text-green-400 hover:text-green-300 transition-colors;
+}
+
+/* Tables */
+table {
+  @apply w-full border-collapse;
+}
+
+thead {
+  @apply bg-gray-800/50;
+}
+
+td, th {
+  @apply px-4 py-3 text-left border-b border-gray-700;
+}
+
+/* Forms */
+input,
+textarea,
+select {
+  @apply bg-gray-700 border border-gray-600 rounded text-white px-3 py-2 focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500/30 transition;
+}
+
+input::placeholder {
+  @apply text-gray-500;
+}
+
+input:disabled,
+textarea:disabled,
+select:disabled {
+  @apply bg-gray-800 text-gray-500 cursor-not-allowed;
+}
+
+/* Buttons */
+button {
+  @apply transition-colors duration-200;
+}
