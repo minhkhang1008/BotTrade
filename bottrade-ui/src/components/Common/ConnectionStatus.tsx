@@ -12,7 +12,16 @@ interface HealthStatus {
 export default function ConnectionStatus() {
   const [health, setHealth] = useState<HealthStatus | null>(null)
   const [loading, setLoading] = useState(true)
+  const [currentTime, setCurrentTime] = useState(new Date())
   const { get } = useApi()
+
+  // Update clock every second
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date())
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [])
 
   useEffect(() => {
     const checkHealth = async () => {
@@ -55,8 +64,8 @@ export default function ConnectionStatus() {
       )}
       <span className="text-sm">DNSE: {dnseConnected ? '🟢 Connected' : '🟡 Disconnected'}</span>
 
-      <span className="text-xs text-gray-400 ml-auto">
-        {new Date(health?.timestamp || '').toLocaleTimeString()}
+      <span className="text-sm text-white font-mono ml-auto">
+        🕐 {currentTime.toLocaleTimeString('vi-VN')}
       </span>
     </div>
   )

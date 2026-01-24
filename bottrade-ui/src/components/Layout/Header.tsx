@@ -5,7 +5,7 @@ import ConnectionStatus from '../Common/ConnectionStatus'
 import { useNavigate } from 'react-router-dom'
 
 export default function Header() {
-  const { toggleSidebar, theme, setTheme } = useAppStore()
+  const { toggleSidebar } = useAppStore()
   const navigate = useNavigate()
 
   return (
@@ -32,14 +32,6 @@ export default function Header() {
 
         {/* Right Side */}
         <div className="flex items-center gap-4">
-          <button
-            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-            className="p-2 hover:bg-gray-800 rounded transition"
-            title="Toggle theme"
-          >
-            {theme === 'dark' ? '☀️' : '🌙'}
-          </button>
-
           <button
             onClick={() => navigate('/settings')}
             className="p-2 hover:bg-gray-800 rounded transition"

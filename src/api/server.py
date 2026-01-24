@@ -146,12 +146,13 @@ async def lifespan(app: FastAPI):
 
 
 # ============ FastAPI App ============
+# Note: lifespan is handled in main.py via on_event decorators
 
 app = FastAPI(
     title="Bot Trade API",
     description="Trading signal bot API with REST and WebSocket support",
-    version="0.1.0",
-    lifespan=lifespan
+    version="0.1.0"
+    # lifespan is NOT set here - handled by main.py
 )
 
 # CORS middleware

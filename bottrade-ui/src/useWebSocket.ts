@@ -6,7 +6,7 @@ interface WebSocketMessage {
   data: any
 }
 
-const WS_URL = (import.meta as any).env?.VITE_WS_URL || 'ws://localhost:8000/ws/v1/stream'
+const WS_URL = (import.meta as any).env?.VITE_WS_URL || 'ws://localhost:8001/ws/v1/stream'
 
 const WebSocketContext = createContext<null>(null)
 
@@ -96,7 +96,7 @@ export function useWebSocket() {
 
 export function WebSocketProvider({ children }: { children: ReactNode }) {
   useWebSocket()
-  return <>{children}</>
+  return <>{ children } </>
 }
 
 export const useWebSocketContext = () => {

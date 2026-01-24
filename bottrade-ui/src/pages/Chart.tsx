@@ -1,29 +1,55 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Download, Share2, RefreshCw } from 'lucide-react'
+import { createChart, ColorType, IChartApi, ISeriesApi, CandlestickData } from 'lightweight-charts'
 import { Card } from '../components/Common/Card'
 import { useApi } from '../hooks/useApi'
 import useAppStore from '../store/appStore'
 import type { Bar, Signal } from '../types/api'
 
 export default function ChartPage() {
-  const { symbol } = useParams<{ symbol: string }>()
+  const { symbol: urlSymbol } = useParams<{ symbol: string }>()
   const navigate = useNavigate()
   const { get } = useApi()
-  const { bars, signals, addBar } = useAppStore()
+  const { bars, signals, addBar, setBars } = useAppStore()
 
   const [loading, setLoading] = useState(true)
   const [timeframe, setTimeframe] = useState('1H')
+  const [symbols, setSymbols] = useState<string[]>([])
+  const [selectedSymbol, setSelectedSymbol] = useState(urlSymbol || 'VNM')
+  
+  // Chart refs
+  const chartContainerRef = useRef<HTMLDivElement>(null)
+  const chartRef = useRef<IChartApi | null>(null)
+  const candlestickSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
 
+  // Fetch available symbols
+  useEffect(() => {
+    const fetchSymbols = async () => {
+      try {
+        const response = await get('/api/v1/symbols')
+        setSymbols(response.data)
+      } catch (error) {
+        console.error('Failed to fetch symbols:', error)
+        setSymbols(['VNM', 'FPT', 'VIC', 'VHM', 'HPG']) // fallback
+      }
+    }
+    fetchSymbols()
+  }, [])
+
+  // Fetch bars data
   useEffect(() => {
     const fetchBars = async () => {
-      if (!symbol) return
+      if (!selectedSymbol) return
+      setLoading(true)
       try {
-        const response = await get(`/api/v1/bars?symbol=${symbol}&limit=100`)
-        addBar(response.data[0]) // Add to store
-        setLoading(false)
+        const response = await get(`/api/v1/bars?symbol=${selectedSymbol}&limit=200`)
+        if (response.data && response.data.length > 0) {
+          setBars(selectedSymbol, response.data)
+        }
       } catch (error) {
         console.error('Failed to fetch bars:', error)
+      } finally {
         setLoading(false)
       }
     }
@@ -31,13 +57,91 @@ export default function ChartPage() {
     fetchBars()
     const interval = setInterval(fetchBars, 60000) // Refresh every minute
     return () => clearInterval(interval)
-  }, [symbol])
+  }, [selectedSymbol])
 
-  if (!symbol) return <div>Invalid symbol</div>
+  // Initialize and update chart
+  useEffect(() => {
+    if (!chartContainerRef.current) return
 
-  const symbolBars = bars.get(symbol) || []
-  const symbolSignals = signals.filter(s => s.symbol === symbol)
+    // Create chart
+    const chart = createChart(chartContainerRef.current, {
+      layout: {
+        background: { type: ColorType.Solid, color: '#0a0a0a' },
+        textColor: '#d1d5db',
+      },
+      grid: {
+        vertLines: { color: '#1f2937' },
+        horzLines: { color: '#1f2937' },
+      },
+      width: chartContainerRef.current.clientWidth,
+      height: 400,
+      timeScale: {
+        timeVisible: true,
+        secondsVisible: false,
+      },
+    })
+
+    const candlestickSeries = chart.addCandlestickSeries({
+      upColor: '#22c55e',
+      downColor: '#ef4444',
+      borderDownColor: '#ef4444',
+      borderUpColor: '#22c55e',
+      wickDownColor: '#ef4444',
+      wickUpColor: '#22c55e',
+    })
+
+    chartRef.current = chart
+    candlestickSeriesRef.current = candlestickSeries
+
+    // Handle resize
+    const handleResize = () => {
+      if (chartContainerRef.current) {
+        chart.applyOptions({ width: chartContainerRef.current.clientWidth })
+      }
+    }
+    window.addEventListener('resize', handleResize)
+
+    return () => {
+      window.removeEventListener('resize', handleResize)
+      chart.remove()
+    }
+  }, [])
+
+  // Update chart data when bars change
+  useEffect(() => {
+    if (!candlestickSeriesRef.current) return
+    
+    const symbolBars = bars.get(selectedSymbol) || []
+    if (symbolBars.length === 0) return
+
+    const chartData: CandlestickData[] = symbolBars
+      .map(bar => ({
+        time: (new Date(bar.timestamp).getTime() / 1000) as any,
+        open: bar.open,
+        high: bar.high,
+        low: bar.low,
+        close: bar.close,
+      }))
+      .sort((a, b) => (a.time as number) - (b.time as number))
+
+    candlestickSeriesRef.current.setData(chartData)
+    chartRef.current?.timeScale().fitContent()
+  }, [bars, selectedSymbol])
+
+  // Handle symbol change
+  const handleSymbolChange = (newSymbol: string) => {
+    setSelectedSymbol(newSymbol)
+    navigate(`/chart/${newSymbol}`, { replace: true })
+  }
+
+  const symbolBars = bars.get(selectedSymbol) || []
+  const symbolSignals = signals.filter(s => s.symbol === selectedSymbol)
   const activeSignal = symbolSignals.find(s => s.status === 'ACTIVE')
+  
+  // Get latest bar for price display
+  const latestBar = symbolBars[symbolBars.length - 1]
+  const prevBar = symbolBars[symbolBars.length - 2]
+  const priceChange = latestBar && prevBar ? ((latestBar.close - prevBar.close) / prevBar.close * 100) : 0
 
   return (
     <div className="space-y-6">
@@ -51,12 +155,28 @@ export default function ChartPage() {
             <ArrowLeft className="w-5 h-5 text-gray-400" />
           </button>
           <div>
-            <h1 className="text-3xl font-bold text-white">{symbol} Chart</h1>
+            <div className="flex items-center gap-3">
+              <h1 className="text-3xl font-bold text-white">{selectedSymbol} Chart</h1>
+              {/* Symbol Dropdown */}
+              <select
+                value={selectedSymbol}
+                onChange={(e) => handleSymbolChange(e.target.value)}
+                className="bg-gray-800 text-white border border-gray-600 rounded px-3 py-1 text-sm focus:outline-none focus:border-green-500"
+              >
+                {symbols.map(sym => (
+                  <option key={sym} value={sym}>{sym}</option>
+                ))}
+              </select>
+            </div>
             <p className="text-gray-400">Technical Analysis & Trading Signals</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button className="p-2 hover:bg-gray-800 rounded transition" title="Refresh">
+          <button 
+            onClick={() => window.location.reload()}
+            className="p-2 hover:bg-gray-800 rounded transition" 
+            title="Refresh"
+          >
             <RefreshCw className="w-5 h-5 text-gray-300" />
           </button>
           <button className="p-2 hover:bg-gray-800 rounded transition" title="Download">
@@ -89,16 +209,22 @@ export default function ChartPage() {
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {/* Chart Area */}
         <div className="lg:col-span-3">
-          <Card title="Candlestick Chart">
-            <div className="bg-black rounded h-96 flex items-center justify-center">
+          <Card title={`${selectedSymbol} - ${timeframe} Candlestick Chart`}>
+            <div className="bg-black rounded">
               {loading ? (
-                <div className="text-gray-400">Loading chart...</div>
-              ) : (
-                <div className="text-gray-400 text-center">
-                  <p>TradingView Lightweight Charts Integration</p>
-                  <p className="text-sm mt-2">Bars: {symbolBars.length}</p>
+                <div className="h-96 flex items-center justify-center text-gray-400">
+                  Loading chart...
                 </div>
+              ) : symbolBars.length === 0 ? (
+                <div className="h-96 flex items-center justify-center text-gray-400">
+                  No data available for {selectedSymbol}
+                </div>
+              ) : (
+                <div ref={chartContainerRef} className="w-full" />
               )}
+            </div>
+            <div className="text-xs text-gray-500 mt-2">
+              Loaded {symbolBars.length} bars
             </div>
           </Card>
 

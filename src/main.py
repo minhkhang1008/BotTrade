@@ -58,6 +58,7 @@ class BotTradeApp:
         self.signal_engines: dict[str, SignalEngine] = {}
         self.dnse_adapter = None
         self.trading_service: Optional[TradingService] = None
+        self._main_loop: Optional[asyncio.AbstractEventLoop] = None
         self._running = False
     
     def _create_signal_engine(self, symbol: str) -> SignalEngine:
@@ -74,9 +75,21 @@ class BotTradeApp:
             atr_period=settings.atr_period
         )
     
+    def _handle_bar_from_thread(self, bar: Bar):
+        """
+        Thread-safe callback for handling bars from MQTT thread.
+        Schedules the async handler in the main event loop.
+        """
+        if self._main_loop and self._main_loop.is_running():
+            self._main_loop.call_soon_threadsafe(
+                lambda: asyncio.create_task(self._on_bar_closed(bar))
+            )
+        else:
+            logger.warning(f"No event loop to handle bar: {bar.symbol}")
+    
     async def _on_bar_closed(self, bar: Bar):
         """Handle new closed bar from DNSE."""
-        logger.info(f"📊 {bar.symbol} | O:{bar.open:.0f} H:{bar.high:.0f} L:{bar.low:.0f} C:{bar.close:.0f}")
+        logger.info(f"📊 {bar.symbol} | O:{bar.open:.2f} H:{bar.high:.2f} L:{bar.low:.2f} C:{bar.close:.2f} V:{bar.volume:.0f}")
         
         try:
             # Save bar to database
@@ -143,20 +156,33 @@ class BotTradeApp:
             logger.error(f"Trade error: {e}")
     
     def _on_connected(self):
-        """Handle DNSE connected."""
+        """Handle DNSE connected (called from MQTT thread)."""
         set_dnse_status(True)
-        asyncio.create_task(broadcast_system_status("connected", True))
         logger.info("✅ DNSE connected")
+        
+        # Schedule async broadcast in the main event loop (thread-safe)
+        if self._main_loop and self._main_loop.is_running():
+            self._main_loop.call_soon_threadsafe(
+                lambda: asyncio.create_task(broadcast_system_status("connected", True))
+            )
     
     def _on_disconnected(self):
-        """Handle DNSE disconnected."""
+        """Handle DNSE disconnected (called from MQTT thread)."""
         set_dnse_status(False)
-        asyncio.create_task(broadcast_system_status("disconnected", False))
         logger.warning("❌ DNSE disconnected")
+        
+        # Schedule async broadcast in the main event loop (thread-safe)
+        if self._main_loop and self._main_loop.is_running():
+            self._main_loop.call_soon_threadsafe(
+                lambda: asyncio.create_task(broadcast_system_status("disconnected", False))
+            )
     
     async def start(self):
         """Start the bot application."""
         self._running = True
+        
+        # Save reference to main event loop for thread-safe callbacks
+        self._main_loop = asyncio.get_running_loop()
         
         # Connect to database
         await db.connect()
@@ -196,7 +222,11 @@ class BotTradeApp:
             await self.dnse_adapter.connect(settings.watchlist_symbols, settings.timeframe)
             asyncio.create_task(self.dnse_adapter.simulate_bars(interval_seconds=10))
         else:
+            # Debug: print settings to see if env is loaded
+            logger.info(f"DNSE Config check - username: '{settings.dnse_username[:3] if settings.dnse_username else 'EMPTY'}***', mqtt_url: '{settings.dnse_mqtt_url}'")
+            
             if settings.dnse_username and settings.dnse_password:
+                logger.info("✅ DNSE credentials found, initializing adapter...")
                 config = DNSEConfig(
                     username=settings.dnse_username,
                     password=settings.dnse_password,
@@ -204,13 +234,14 @@ class BotTradeApp:
                 )
                 self.dnse_adapter = DNSEAdapter(
                     config=config,
-                    on_bar_closed=lambda bar: asyncio.create_task(self._on_bar_closed(bar)),
+                    # Use thread-safe callback for MQTT thread
+                    on_bar_closed=self._handle_bar_from_thread,
                     on_connected=self._on_connected,
                     on_disconnected=self._on_disconnected
                 )
                 self.dnse_adapter.connect(settings.watchlist_symbols, settings.timeframe)
             else:
-                logger.warning("DNSE not configured - API-only mode")
+                logger.warning("⚠️ DNSE credentials not found - API-only mode (set DNSE_USERNAME and DNSE_PASSWORD in .env)")
         
         logger.info(f"🚀 Bot Trade started | Symbols: {settings.watchlist_symbols}")
     
@@ -266,7 +297,7 @@ def main():
         host=settings.host,
         port=settings.port,
         reload=False,
-        log_level="warning"
+        log_level="info"
     )
 
 

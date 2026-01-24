@@ -51,12 +51,21 @@ Tài liệu kỹ thuật chi tiết về cách hoạt động của Bot Trade.
 
 ### MQTT over WebSocket
 
-**URL:** `wss://lightspeed.dnse.com.vn/ws`
+**URL:** `wss://datafeed-lts-krx.dnse.com.vn/wss`
 
-**Authentication:**
+**Authentication (theo API doc DNSE):**
 ```
-Username: <email hoặc số điện thoại>
-Password: <mật khẩu DNSE>
+1. Đăng nhập: POST https://api.dnse.com.vn/user-service/api/auth
+   -> Lấy JWT token
+
+2. Lấy thông tin user: GET https://api.dnse.com.vn/user-service/api/me
+   Header: Authorization: Bearer <JWT token>
+   -> Lấy investorId
+
+3. Kết nối MQTT:
+   - ClientID: dnse-price-json-mqtt-ws-sub-<investorId>-<random_sequence>
+   - Username: <investorId>
+   - Password: <JWT token>
 ```
 
 **Topic format:**
@@ -65,6 +74,12 @@ plaintext/quotes/krx/mdds/v2/ohlc/stock/{timeframe}/{symbol}
 ```
 
 Ví dụ: `plaintext/quotes/krx/mdds/v2/ohlc/stock/1H/VNM`
+
+**Timeframe:**
+- `1`: Phút
+- `1H`: Giờ
+- `1D`: Ngày
+- `W`: Tuần
 
 **Message format (JSON):**
 ```json

@@ -78,7 +78,7 @@ pip install -r requirements.txt
 python -m src.main --mock
 
 # Hoặc chạy uvicorn trực tiếp:
-python -m uvicorn src.main:app --app-dir D:\path\to\BotTrade --host 127.0.0.1 --port 8000
+python -m uvicorn src.main:app --app-dir D:\path\to\BotTrade --host 127.0.0.1 --port 8001
 
 # Frontend (mở terminal mới):
 cd bottrade-ui
@@ -113,16 +113,15 @@ DNSE_ACCOUNT_NO=
 WATCHLIST=VNM,FPT,VIC
 TIMEFRAME=1H
 HOST=0.0.0.0
-PORT=8000
+PORT=8001
 AUTO_TRADE_ENABLED=False
 ```
 
 - Frontend: nếu cần tùy chỉnh endpoint, tạo `bottrade-ui/.env` và dùng tiền tố `VITE_`:
 
 ```
-VITE_API_URL=http://localhost:8000
-VITE_WS_URL=ws://localhost:8000/ws/v1/stream
-VITE_MOCK_API=http://localhost:8001
+VITE_API_URL=http://localhost:8001
+VITE_WS_URL=ws://localhost:8001/ws/v1/stream
 ```
 
 ---
@@ -130,7 +129,7 @@ VITE_MOCK_API=http://localhost:8001
 ## **5) Kiểm tra sau khi chạy**
 - Frontend: `http://localhost:5173` (hoặc port Vite báo ra)
 - Mock API (nếu dùng): `http://localhost:8001`
-- Backend (uvicorn): `http://127.0.0.1:8000/docs` — Swagger UI
+- Backend (uvicorn): `http://127.0.0.1:8001/docs` — Swagger UI
 
 ---
 
@@ -146,7 +145,7 @@ pytest -q
 ## **7) Vấn đề thường gặp & cách khắc phục**
 - **Lỗi khi pip cài `pydantic-core` trên Python quá mới (cần Rust/Cargo hoặc wheel)**: dùng Python 3.11 hoặc cài Rust + Visual C++ Build Tools. Khuyến nghị: dùng Python 3.11 để có wheel prebuilt.
 - **Lỗi build `numpy`/`pandas` trên Windows**: cài `numpy`/`pandas` bằng `conda install -c conda-forge numpy pandas` hoặc cài Visual C++ Build Tools (khó hơn).
-- **Port đã bị chiếm**: kiểm tra `Get-NetTCPConnection -LocalPort 8000` và dừng tiến trình chiếm cổng.
+- **Port đã bị chiếm**: kiểm tra `Get-NetTCPConnection -LocalPort 8001` và dừng tiến trình chiếm cổng.
 - **WebSocket không kết nối**: kiểm tra URL WS trong `bottrade-ui/src/useWebSocket.ts` hoặc `VITE_WS_URL` và kiểm tra CORS/backend chạy.
 
 ---

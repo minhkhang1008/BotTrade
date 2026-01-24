@@ -10,10 +10,13 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
     
     # DNSE Configuration
+    # Username: Email hoặc Số điện thoại hoặc Số lưu ký
     dnse_username: str = Field(default="", alias="DNSE_USERNAME")
+    # Password: Mật khẩu DNSE
     dnse_password: str = Field(default="", alias="DNSE_PASSWORD")
+    # MQTT WebSocket URL (theo doc DNSE: datafeed-lts-krx.dnse.com.vn:443/wss)
     dnse_mqtt_url: str = Field(
-        default="wss://lightspeed.dnse.com.vn/ws",
+        default="wss://datafeed-lts-krx.dnse.com.vn/wss",
         alias="DNSE_MQTT_URL"
     )
     

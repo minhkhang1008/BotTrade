@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useRef, createContext, useContext, ReactNode } from 'react'
+import { useEffect, useRef, ReactNode } from 'react'
 import useAppStore from '../store/appStore'
 
 interface WebSocketMessage {
@@ -6,117 +6,144 @@ interface WebSocketMessage {
   data: any
 }
 
+// Single WebSocket URL - use environment variable or default
+const WS_URL = (import.meta as any).env?.VITE_WS_URL || 'ws://127.0.0.1:8001/ws/v1/stream'
 
-// Build a prioritized list of candidate WS endpoints to try. This helps
-// when `localhost` resolves to IPv6 (::1) but the server is bound to IPv4.
-const ENV_WS = (import.meta as any).env?.VITE_WS_URL
-const WS_CANDIDATES = [
-  ENV_WS,
-  'ws://127.0.0.1:8000/ws/v1/stream',
-  'ws://localhost:8000/ws/v1/stream'
-].filter(Boolean)
+// Singleton WebSocket manager to prevent multiple connections
+let globalWs: WebSocket | null = null
+let connectionPromise: Promise<void> | null = null
+let listeners: Set<(msg: WebSocketMessage) => void> = new Set()
+let isConnecting = false
 
-let currentCandidateIndex = 0
+function connectWebSocket(): Promise<void> {
+  if (globalWs?.readyState === WebSocket.OPEN) {
+    return Promise.resolve()
+  }
 
-const WebSocketContext = createContext<null>(null)
+  if (connectionPromise && isConnecting) {
+    return connectionPromise
+  }
 
-export function useWebSocket() {
-  const ws = useRef<WebSocket | null>(null)
-  const store = useAppStore()
-  const reconnectAttempts = useRef(0)
-  const maxReconnectAttempts = 5
-
-  const connect = useCallback(() => {
+  isConnecting = true
+  connectionPromise = new Promise((resolve, reject) => {
     try {
-      // rotate through candidates on repeated failures
-      const WS_URL = WS_CANDIDATES[currentCandidateIndex % WS_CANDIDATES.length]
-      console.log('useWebSocket: attempting connection to', WS_URL, `(candidate ${currentCandidateIndex + 1}/${WS_CANDIDATES.length})`)
-      // expose for debugging in browser console
-      try {
-        ;(window as any).__WS_CANDIDATES = WS_CANDIDATES
-        ;(window as any).__WS_TRY_INDEX = currentCandidateIndex
-      } catch (e) {}
+      console.log('[WS] Connecting to:', WS_URL)
+      globalWs = new WebSocket(WS_URL)
 
-      ws.current = new WebSocket(WS_URL)
-
-      ws.current.onopen = () => {
-        console.log('WebSocket connected')
-        store.setConnected(true)
-        reconnectAttempts.current = 0
+      globalWs.onopen = () => {
+        console.log('[WS] Connected')
+        isConnecting = false
+        resolve()
       }
 
-      ws.current.onmessage = (event: MessageEvent) => {
+      globalWs.onmessage = (event: MessageEvent) => {
         try {
           const message: WebSocketMessage = JSON.parse(event.data)
-
-          switch (message.event) {
-            case 'system':
-              console.log('System event:', message.data)
-              break
-
-            case 'bar_closed':
-              console.log('New bar:', message.data)
-              store.addBar(message.data)
-              break
-
-            case 'signal':
-              console.log('New signal:', message.data)
-              store.addSignal(message.data)
-              // Show notification here
-              break
-
-            default:
-              console.log('Unknown event:', message.event)
-          }
+          listeners.forEach(listener => listener(message))
         } catch (error) {
-          console.error('Failed to parse WebSocket message:', error)
+          console.error('[WS] Failed to parse message:', error)
         }
       }
 
-      ws.current.onerror = (error: Event) => {
-        console.error('WebSocket error event:', error)
-        // Some browsers provide little detail in the error event; log the readyState
-        console.log('WebSocket readyState:', ws.current?.readyState)
-        store.setConnected(false)
+      globalWs.onerror = (error: Event) => {
+        console.error('[WS] Error:', error)
+        isConnecting = false
       }
 
-      ws.current.onclose = (ev: CloseEvent) => {
-        console.log('WebSocket disconnected', { code: ev?.code, reason: ev?.reason, wasClean: ev?.wasClean })
-        store.setConnected(false)
+      globalWs.onclose = (ev: CloseEvent) => {
+        console.log('[WS] Disconnected:', ev.code, ev.reason)
+        globalWs = null
+        isConnecting = false
+        connectionPromise = null
 
-        // If connection failed quickly, try next candidate before backoff
-        reconnectAttempts.current++
-        currentCandidateIndex++
-
-        if (reconnectAttempts.current <= maxReconnectAttempts) {
-          const delay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), 30000)
-          console.log(`Attempting to reconnect (candidate ${currentCandidateIndex % WS_CANDIDATES.length}) in ${delay}ms...`)
-          setTimeout(() => connect(), delay)
-        } else {
-          console.warn('Max reconnect attempts reached for WebSocket')
+        // Auto-reconnect after 3 seconds if not a clean close
+        if (ev.code !== 1000) {
+          setTimeout(() => {
+            console.log('[WS] Attempting reconnect...')
+            connectWebSocket()
+          }, 3000)
         }
       }
+
+      // Timeout after 5 seconds
+      setTimeout(() => {
+        if (isConnecting) {
+          console.warn('[WS] Connection timeout')
+          globalWs?.close()
+          isConnecting = false
+          reject(new Error('Connection timeout'))
+        }
+      }, 5000)
+
     } catch (error) {
-      console.error('Failed to create WebSocket:', error)
+      isConnecting = false
+      reject(error)
     }
-  }, [store])
+  })
 
-  const disconnect = useCallback(() => {
-    if (ws.current) {
-      ws.current.close()
-      ws.current = null
-    }
-  }, [])
+  return connectionPromise
+}
+
+export function useWebSocket() {
+  const storeRef = useRef(useAppStore.getState())
+  const mounted = useRef(true)
 
   useEffect(() => {
-    connect()
+    mounted.current = true
+
+    // Subscribe to store changes
+    const unsubStore = useAppStore.subscribe(state => {
+      storeRef.current = state
+    })
+
+    // Message handler
+    const handleMessage = (message: WebSocketMessage) => {
+      if (!mounted.current) return
+
+      const store = storeRef.current
+      switch (message.event) {
+        case 'system':
+          console.log('[WS] System:', message.data)
+          break
+        case 'bar_closed':
+          store.addBar(message.data)
+          break
+        case 'signal':
+          store.addSignal(message.data)
+          break
+      }
+    }
+
+    // Register listener
+    listeners.add(handleMessage)
+
+    // Connect
+    connectWebSocket()
+      .then(() => {
+        if (mounted.current) {
+          useAppStore.getState().setConnected(true)
+        }
+      })
+      .catch(() => {
+        if (mounted.current) {
+          useAppStore.getState().setConnected(false)
+        }
+      })
 
     return () => {
-      disconnect()
-    }
-  }, [connect, disconnect])
+      mounted.current = false
+      listeners.delete(handleMessage)
+      unsubStore()
 
-  return { connected: store.connected }
+      // Only close if no more listeners
+      if (listeners.size === 0 && globalWs) {
+        globalWs.close(1000, 'Component unmounted')
+        globalWs = null
+      }
+    }
+  }, []) // Empty deps - run once
+
+  return { connected: useAppStore(state => state.connected) }
 }
 
 export function WebSocketProvider({ children }: { children: ReactNode }): ReactNode {
