@@ -125,6 +125,9 @@ class SignalEngine:
         
         current_bar = self.bars[-1]
         
+        # Log current state for debugging
+        logger.debug(f"📋 Checking signal for {current_bar.symbol} | Bars: {len(self.bars)} | Pivot lows: {len(self.pivot_detector.pivot_lows)} | Pivot highs: {len(self.pivot_detector.pivot_highs)}")
+        
         # Get indicators
         indicators = get_all_indicators(
             self.bars,
@@ -149,29 +152,36 @@ class SignalEngine:
         
         if not trend_result.is_uptrend:
             failed.append(f"No uptrend: {trend_result.reason}")
+            logger.debug(f"❌ Trend check failed: {trend_result.reason}")
         else:
             reasons.append(f"✓ Uptrend: {trend_result.reason}")
+            logger.debug(f"✅ Trend check passed: {trend_result.reason}")
         
         # Condition 2: Price touches support zone
         support_zone = self._get_support_zone(indicators.atr)
         if support_zone is None:
             failed.append("No support zone available")
+            logger.debug(f"❌ No support zone (need at least 1 pivot low)")
         else:
             if support_zone.contains_price(current_bar.low, current_bar.high):
                 reasons.append(
                     f"✓ Price in support zone [{support_zone.zone_low:.2f} - {support_zone.zone_high:.2f}]"
                 )
+                logger.debug(f"✅ Price in support zone [{support_zone.zone_low:.0f} - {support_zone.zone_high:.0f}]")
             else:
                 failed.append(
                     f"Price not in support zone [{support_zone.zone_low:.2f} - {support_zone.zone_high:.2f}]"
                 )
+                logger.debug(f"❌ Price {current_bar.low:.0f}-{current_bar.high:.0f} not in zone [{support_zone.zone_low:.0f} - {support_zone.zone_high:.0f}]")
         
         # Condition 3: Bullish reversal pattern
         pattern = detect_bullish_reversal(self.bars)
         if pattern:
             reasons.append(f"✓ Bullish reversal: {pattern.value}")
+            logger.debug(f"✅ Pattern detected: {pattern.value}")
         else:
             failed.append("No bullish reversal pattern")
+            logger.debug(f"❌ No bullish pattern | Bar: O:{current_bar.open:.0f} H:{current_bar.high:.0f} L:{current_bar.low:.0f} C:{current_bar.close:.0f} | Body:{current_bar.body_size:.0f} LowerWick:{current_bar.lower_shadow:.0f} UpperWick:{current_bar.upper_shadow:.0f}")
         
         # Condition 4: Confirmation (MACD cross OR RSI > 50)
         confirmation = False
@@ -192,12 +202,23 @@ class SignalEngine:
         
         if confirmation:
             reasons.append(f"✓ Confirmation: {confirmation_reason}")
+            logger.debug(f"✅ Confirmation: {confirmation_reason}")
         else:
             rsi_str = f"{indicators.rsi:.1f}" if indicators.rsi else "N/A"
             failed.append(f"No confirmation (MACD no cross, RSI={rsi_str})")
+            logger.debug(f"❌ No confirmation: RSI={rsi_str}")
         
         # All conditions must pass
         all_passed = len(failed) == 0 and len(reasons) >= 4
+        
+        # Log summary
+        if len(reasons) > 0 or len(failed) > 0:
+            logger.info(f"📊 Signal check for {current_bar.symbol}: {len(reasons)}/4 conditions passed")
+            if len(reasons) >= 2:  # Close to triggering
+                for r in reasons:
+                    logger.info(f"    {r}")
+                for f in failed:
+                    logger.info(f"    ❌ {f}")
         
         if not all_passed:
             return SignalCheckResult(
@@ -291,3 +312,51 @@ class SignalEngine:
         self.bars.clear()
         self.pivot_detector.clear()
         self.previous_macd = None
+    
+    def generate_demo_signal(self, symbol: str, bar: Optional[Bar] = None) -> Signal:
+        """
+        Generate a demo BUY signal for presentation purposes.
+        This bypasses the normal signal conditions for demo mode.
+        
+        Args:
+            symbol: The stock symbol
+            bar: Optional current bar (for realistic prices)
+        
+        Returns:
+            A demo Signal object
+        """
+        import random
+        
+        # Use bar prices if available, otherwise generate
+        if bar:
+            entry = bar.close
+            base_price = bar.close
+        else:
+            base_price = 50000 + random.uniform(-5000, 10000)
+            entry = base_price
+        
+        # Calculate realistic SL/TP
+        atr = base_price * 0.02  # Assume 2% ATR
+        sl = entry - (atr * 1.5)  # SL 1.5 ATR below
+        risk = entry - sl
+        tp = entry + (self.risk_reward_ratio * risk)
+        
+        demo_reasons = [
+            "📊 DEMO MODE - Signal for presentation",
+            "✅ Uptrend: 3 higher highs + 3 higher lows detected",
+            "✅ Price at support zone (previous pivot low)",
+            "✅ Bullish reversal: Hammer pattern detected",
+            "✅ Confirmation: MACD bullish crossover + RSI > 50"
+        ]
+        
+        return Signal(
+            symbol=symbol,
+            signal_type=SignalType.BUY,
+            timestamp=datetime.now(),
+            entry=entry,
+            stop_loss=sl,
+            take_profit=tp,
+            quantity=self.default_quantity,
+            status=SignalStatus.ACTIVE,
+            reason="\n".join(demo_reasons)
+        )

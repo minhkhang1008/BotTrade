@@ -109,7 +109,15 @@ export function useWebSocket() {
           store.addBar(message.data)
           break
         case 'signal':
+          console.log('[WS] 🔔 NEW SIGNAL:', message.data)
           store.addSignal(message.data)
+          // Show browser notification for new signals
+          if ('Notification' in window && Notification.permission === 'granted') {
+            new Notification(`🔔 ${message.data.signal_type} Signal: ${message.data.symbol}`, {
+              body: `Entry: ${message.data.entry?.toLocaleString()} | SL: ${message.data.stop_loss?.toLocaleString()} | TP: ${message.data.take_profit?.toLocaleString()}`,
+              icon: '/favicon.ico'
+            })
+          }
           break
       }
     }

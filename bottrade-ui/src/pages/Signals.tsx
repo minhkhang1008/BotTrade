@@ -1,11 +1,12 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useMemo } from 'react'
 import type { Signal } from '../types/api'
 import { useApi } from '../hooks/useApi'
+import useAppStore from '../store/appStore'
 import { Card } from '../components/Common/Card'
 import { ChevronDown, Download, Filter } from 'lucide-react'
 
 export default function SignalsPage() {
-  const [signals, setSignals] = useState<Signal[]>([])
+  const [apiSignals, setApiSignals] = useState<Signal[]>([])
   const [filteredSignals, setFilteredSignals] = useState<Signal[]>([])
   const [loading, setLoading] = useState(true)
   const [filterStatus, setFilterStatus] = useState('ALL')
@@ -13,12 +14,22 @@ export default function SignalsPage() {
   const [page, setPage] = useState(1)
   const itemsPerPage = 20
   const { get } = useApi()
+  
+  // Get realtime signals from WebSocket store
+  const realtimeSignals = useAppStore(state => state.signals)
+  
+  // Merge API signals with realtime signals (realtime takes priority)
+  const signals = useMemo(() => {
+    const apiSignalIds = new Set(apiSignals.map(s => s.id))
+    const newRealtimeSignals = realtimeSignals.filter(s => !apiSignalIds.has(s.id))
+    return [...newRealtimeSignals, ...apiSignals]
+  }, [apiSignals, realtimeSignals])
 
   useEffect(() => {
     const fetchSignals = async () => {
       try {
         const response = await get('/api/v1/signals?limit=500')
-        setSignals(response.data)
+        setApiSignals(response.data)
         setLoading(false)
       } catch (error) {
         console.error('Failed to fetch signals:', error)

@@ -6,7 +6,7 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Callable, Awaitable
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,9 +14,26 @@ from pydantic import BaseModel
 
 from ..config import settings
 from ..storage.database import db
-from ..core.models import Signal, Bar, SignalStatus
+from ..core.models import Signal, Bar, SignalStatus, SignalType
 
 logger = logging.getLogger(__name__)
+
+# Callback for watchlist update (set by main.py)
+_watchlist_update_callback: Optional[Callable[[List[str]], Awaitable[None]]] = None
+
+def set_watchlist_update_callback(callback: Callable[[List[str]], Awaitable[None]]):
+    """Register callback for watchlist updates."""
+    global _watchlist_update_callback
+    _watchlist_update_callback = callback
+
+
+# Callback for forcing a demo signal (set by main.py)
+_force_demo_signal_callback: Optional[Callable[[str], Awaitable[Signal]]] = None
+
+def set_force_demo_signal_callback(callback: Callable[[str], Awaitable[Signal]]):
+    """Register callback for forcing demo signals."""
+    global _force_demo_signal_callback
+    _force_demo_signal_callback = callback
 
 
 # ============ Pydantic Models for API ============
@@ -214,11 +231,33 @@ async def get_settings():
 @app.put("/api/v1/settings", response_model=SettingsResponse)
 async def update_settings(update: SettingsUpdate):
     """Update settings."""
+    import json
+    watchlist_changed = False
+    
     if update.watchlist is not None:
-        app_state.current_settings["watchlist"] = update.watchlist
+        old_watchlist = app_state.current_settings.get("watchlist", [])
+        new_watchlist = update.watchlist
+        
+        # Check if watchlist actually changed
+        if set(old_watchlist) != set(new_watchlist):
+            watchlist_changed = True
+        
+        app_state.current_settings["watchlist"] = new_watchlist
+        # Save watchlist to database for persistence
+        await db.save_setting("watchlist", json.dumps(new_watchlist))
     
     if update.default_quantity is not None:
         app_state.current_settings["default_quantity"] = update.default_quantity
+        # Save default_quantity to database for persistence
+        await db.save_setting("default_quantity", str(update.default_quantity))
+    
+    # Update DNSE subscription if watchlist changed
+    if watchlist_changed and _watchlist_update_callback:
+        try:
+            await _watchlist_update_callback(app_state.current_settings["watchlist"])
+            logger.info(f"Watchlist updated and saved to database: {app_state.current_settings['watchlist']}")
+        except Exception as e:
+            logger.error(f"Failed to update watchlist subscription: {e}")
     
     # Broadcast settings update
     await manager.broadcast("settings_updated", app_state.current_settings)
@@ -275,6 +314,69 @@ async def get_signal(signal_id: int):
         risk=signal.risk,
         reward=signal.reward,
         risk_reward_ratio=signal.risk_reward_ratio
+    )
+
+
+class IndicatorResponse(BaseModel):
+    """Response model for indicators."""
+    symbol: str
+    rsi: Optional[float] = None
+    macd_line: Optional[float] = None
+    macd_signal: Optional[float] = None
+    macd_histogram: Optional[float] = None
+    atr: Optional[float] = None
+    has_macd_crossover: bool = False
+    timestamp: str
+
+
+@app.get("/api/v1/indicators/{symbol}", response_model=IndicatorResponse)
+async def get_indicators(symbol: str):
+    """Get current indicator values for a symbol."""
+    from ..core.indicators import get_all_indicators, calculate_macd, check_macd_crossover
+    from ..core.models import Bar
+    
+    # Get bars for this symbol
+    bars = await db.get_bars(symbol=symbol, limit=200)
+    
+    if not bars or len(bars) < 20:
+        return IndicatorResponse(
+            symbol=symbol,
+            timestamp=datetime.now().isoformat()
+        )
+    
+    # Get settings for indicator periods
+    rsi_period = settings.rsi_period
+    macd_fast = settings.macd_fast
+    macd_slow = settings.macd_slow
+    macd_signal = settings.macd_signal
+    atr_period = settings.atr_period
+    
+    # Calculate indicators
+    indicators = get_all_indicators(
+        bars, rsi_period, macd_fast, macd_slow, macd_signal, atr_period
+    )
+    
+    # Calculate MACD for crossover check
+    closes = [b.close for b in bars]
+    current_macd = calculate_macd(closes, macd_fast, macd_slow, macd_signal)
+    
+    # Check crossover (need previous MACD)
+    has_crossover = False
+    if len(bars) > 1:
+        prev_closes = closes[:-1]
+        prev_macd = calculate_macd(prev_closes, macd_fast, macd_slow, macd_signal)
+        if current_macd and prev_macd:
+            has_crossover = check_macd_crossover(current_macd, prev_macd)
+    
+    return IndicatorResponse(
+        symbol=symbol,
+        rsi=indicators.rsi,
+        macd_line=current_macd.macd_line if current_macd else None,
+        macd_signal=current_macd.signal_line if current_macd else None,
+        macd_histogram=current_macd.histogram if current_macd else None,
+        atr=indicators.atr,
+        has_macd_crossover=has_crossover,
+        timestamp=datetime.now().isoformat()
     )
 
 
@@ -382,6 +484,10 @@ class TradingStatusResponse(BaseModel):
     auto_trade_enabled: bool
     trading_token_valid: bool
     account_no: str
+    mock_mode: bool = False
+    authenticated: bool = False
+    active_symbols: List[str] = []
+    signals_today: int = 0
 
 
 class OrderRequest(BaseModel):
@@ -393,19 +499,44 @@ class OrderRequest(BaseModel):
 @app.get("/api/v1/trading/status", response_model=TradingStatusResponse)
 async def get_trading_status():
     """Get trading service status."""
+    import os
+    from src.config import settings as app_settings
+    
+    # Check mock mode from environment variable
+    mock_mode = os.environ.get("BOT_TRADE_MOCK_MODE", "false").lower() == "true"
+    
+    # Count signals today
+    signals_today = 0
+    if _db:
+        from datetime import datetime
+        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        all_signals = _db.get_signals(limit=100)
+        signals_today = sum(1 for s in all_signals if s.timestamp >= today_start)
+    
+    # Get active symbols from watchlist
+    active_symbols = app_settings.watchlist_symbols
+    
     if not _trading_service:
         return TradingStatusResponse(
             trading_enabled=False,
-            auto_trade_enabled=False,
+            auto_trade_enabled=app_settings.auto_trade_enabled,
             trading_token_valid=False,
-            account_no=""
+            account_no="",
+            mock_mode=mock_mode,
+            authenticated=False,
+            active_symbols=active_symbols,
+            signals_today=signals_today
         )
     
     return TradingStatusResponse(
         trading_enabled=True,
-        auto_trade_enabled=settings.auto_trade_enabled,
+        auto_trade_enabled=app_settings.auto_trade_enabled,
         trading_token_valid=_trading_service.tokens.is_trading_token_valid(),
-        account_no=_trading_service.account_no or ""
+        account_no=_trading_service.account_no or "",
+        mock_mode=mock_mode,
+        authenticated=_trading_service.tokens.is_trading_token_valid(),
+        active_symbols=active_symbols,
+        signals_today=signals_today
     )
 
 
@@ -520,4 +651,63 @@ async def cancel_order(order_id: str):
         return {"message": "Order cancelled"}
     else:
         raise HTTPException(status_code=500, detail="Failed to cancel order")
+
+
+# ============ Demo Mode Endpoint ============
+
+# Callback for demo mode (set by main.py)
+_demo_mode_callback: Optional[Callable[[], Awaitable[None]]] = None
+
+
+def set_demo_mode_callback(callback: Callable[[], Awaitable[None]]):
+    """Register callback for demo mode activation."""
+    global _demo_mode_callback
+    _demo_mode_callback = callback
+
+
+@app.post("/api/v1/demo/start")
+async def start_demo_mode():
+    """
+    Start demo mode - generates mock data with signals for presentation.
+    This will generate a sequence of bars that leads to a BUY signal.
+    """
+    if _demo_mode_callback:
+        try:
+            await _demo_mode_callback()
+            return {"message": "Demo mode started - signals will be generated shortly"}
+        except Exception as e:
+            logger.error(f"Failed to start demo mode: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+    else:
+        raise HTTPException(status_code=503, detail="Demo mode not available - bot not running in mock mode")
+
+
+class ForceDemoSignalRequest(BaseModel):
+    symbol: Optional[str] = None
+
+
+@app.post("/api/v1/demo/force-signal")
+async def force_demo_signal(request: ForceDemoSignalRequest = None):
+    """
+    Force generate a demo BUY signal immediately for testing/presentation.
+    This bypasses all normal signal conditions and creates a signal directly.
+    
+    Useful for:
+    - Testing the UI signal display
+    - Demo presentations
+    - Testing notification flow
+    """
+    if _force_demo_signal_callback:
+        try:
+            symbol = request.symbol if request and request.symbol else None
+            signal = await _force_demo_signal_callback(symbol)
+            return {
+                "message": "Demo signal generated",
+                "signal": signal.to_dict()
+            }
+        except Exception as e:
+            logger.error(f"Failed to force demo signal: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+    else:
+        raise HTTPException(status_code=503, detail="Force signal not available - bot not running in mock mode")
 

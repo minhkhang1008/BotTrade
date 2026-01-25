@@ -73,6 +73,12 @@ class Database:
             
             CREATE INDEX IF NOT EXISTS idx_signals_status 
                 ON signals(status);
+                
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
         """)
         await self._connection.commit()
     
@@ -265,6 +271,33 @@ class Database:
             reason=row[9] or "",
             original_sl=row[10] or row[5]
         )
+
+    # ============ Settings Operations ============
+    
+    async def save_setting(self, key: str, value: str):
+        """Save a setting to database."""
+        await self._connection.execute("""
+            INSERT OR REPLACE INTO settings (key, value, updated_at)
+            VALUES (?, ?, ?)
+        """, (key, value, datetime.now().isoformat()))
+        await self._connection.commit()
+    
+    async def get_setting(self, key: str, default: str = None) -> Optional[str]:
+        """Get a setting from database."""
+        async with self._connection.execute(
+            "SELECT value FROM settings WHERE key = ?",
+            (key,)
+        ) as cursor:
+            row = await cursor.fetchone()
+        return row[0] if row else default
+    
+    async def get_all_settings(self) -> dict:
+        """Get all settings as a dictionary."""
+        async with self._connection.execute(
+            "SELECT key, value FROM settings"
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return {row[0]: row[1] for row in rows}
 
 
 # Global database instance

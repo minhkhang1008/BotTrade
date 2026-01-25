@@ -11,6 +11,18 @@ interface AppState {
   connected: boolean
   setConnected: (connected: boolean) => void
 
+  // Demo Mode State
+  demoMode: boolean
+  setDemoMode: (demoMode: boolean) => void
+
+  // Auto Trade State
+  autoTradeEnabled: boolean
+  setAutoTradeEnabled: (enabled: boolean) => void
+
+  // OTP Test State
+  testOtpSignal: Signal | null
+  setTestOtpSignal: (signal: Signal | null) => void
+
   // Data State
   signals: Signal[]
   setSignals: (signals: Signal[]) => void
@@ -40,6 +52,18 @@ export const useAppStore = create<AppState>(set => ({
   // Connection State
   connected: false,
   setConnected: (connected: boolean) => set({ connected }),
+
+  // Demo Mode State
+  demoMode: false,
+  setDemoMode: (demoMode: boolean) => set({ demoMode }),
+
+  // Auto Trade State
+  autoTradeEnabled: false,
+  setAutoTradeEnabled: (enabled: boolean) => set({ autoTradeEnabled: enabled }),
+
+  // OTP Test State
+  testOtpSignal: null,
+  setTestOtpSignal: (signal: Signal | null) => set({ testOtpSignal: signal }),
 
   // Data State
   signals: [],

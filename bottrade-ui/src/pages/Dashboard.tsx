@@ -1,17 +1,49 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 import { TrendingUp, TrendingDown, Activity, AlertCircle, Zap } from 'lucide-react'
 import { useApi } from '../hooks/useApi'
+import useAppStore from '../store/appStore'
 import ConnectionStatus from '../components/Common/ConnectionStatus'
 import ActiveSignalsCard from '../components/Common/ActiveSignalsCard'
 import { Card, CardGrid } from '../components/Common/Card'
+import OTPDialog from '../components/Trading/OTPDialog'
 import type { Signal, HealthStatus } from '../types/api'
 
 export default function DashboardPage() {
   const [health, setHealth] = useState<HealthStatus | null>(null)
-  const [signals, setSignals] = useState<Signal[]>([])
+  const [apiSignals, setApiSignals] = useState<Signal[]>([])
   const [loading, setLoading] = useState(true)
+  const [otpDialogOpen, setOtpDialogOpen] = useState(false)
+  const [pendingSignal, setPendingSignal] = useState<Signal | null>(null)
   const { get } = useApi()
-
+  
+  // Get realtime signals and auto-trade setting from WebSocket store
+  const realtimeSignals = useAppStore(state => state.signals)
+  const autoTradeEnabled = useAppStore(state => state.autoTradeEnabled)
+  const testOtpSignal = useAppStore(state => state.testOtpSignal)
+  const setTestOtpSignal = useAppStore(state => state.setTestOtpSignal)
+  
+  // Track processed signal IDs to avoid duplicate OTP dialogs
+  const processedSignalIds = useRef<Set<number>>(new Set())
+  
+  // Check for test OTP signal from Zustand store
+  useEffect(() => {
+    if (testOtpSignal) {
+      setPendingSignal(testOtpSignal)
+      setOtpDialogOpen(true)
+      // Clear the test signal from store
+      setTestOtpSignal(null)
+    }
+  }, [testOtpSignal, setTestOtpSignal])
+  
+  // Merge API signals with realtime signals (realtime takes priority)
+  const signals = React.useMemo(() => {
+    // Create map of existing signal IDs for quick lookup
+    const apiSignalIds = new Set(apiSignals.map(s => s.id))
+    // Add realtime signals that aren't in API response yet
+    const newRealtimeSignals = realtimeSignals.filter(s => !apiSignalIds.has(s.id))
+    // Combine: new realtime signals first, then API signals
+    return [...newRealtimeSignals, ...apiSignals]
+  }, [apiSignals, realtimeSignals])
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -20,7 +52,7 @@ export default function DashboardPage() {
           get('/api/v1/signals?limit=50')
         ])
         setHealth(healthRes.data)
-        setSignals(signalsRes.data)
+        setApiSignals(signalsRes.data)
       } catch (error) {
         console.error('Failed to fetch dashboard data:', error)
       } finally {
@@ -32,6 +64,40 @@ export default function DashboardPage() {
     const interval = setInterval(fetchData, 30000) // Refresh every 30 seconds
     return () => clearInterval(interval)
   }, [])
+
+  // Watch for new signals and trigger OTP dialog if auto-trade is enabled
+  useEffect(() => {
+    if (!autoTradeEnabled || realtimeSignals.length === 0) return
+
+    // Find new unprocessed signals
+    const newSignals = realtimeSignals.filter(
+      s => s.status === 'ACTIVE' && !processedSignalIds.current.has(s.id)
+    )
+
+    if (newSignals.length > 0) {
+      const latestSignal = newSignals[0]
+      processedSignalIds.current.add(latestSignal.id)
+      
+      // Only trigger OTP for BUY signals in auto-trade mode
+      if (latestSignal.signal_type === 'BUY') {
+        console.log('[Auto-Trade] New signal detected, opening OTP dialog:', latestSignal)
+        setPendingSignal(latestSignal)
+        setOtpDialogOpen(true)
+      }
+    }
+  }, [realtimeSignals, autoTradeEnabled])
+
+  // Handle OTP dialog close
+  const handleOtpDialogClose = () => {
+    setOtpDialogOpen(false)
+    setPendingSignal(null)
+  }
+
+  // Handle order result
+  const handleOrderPlaced = (success: boolean, message: string) => {
+    console.log('[Auto-Trade] Order result:', success, message)
+    // Could show a toast notification here
+  }
 
   if (loading) {
     return (
@@ -51,7 +117,6 @@ export default function DashboardPage() {
   const sellSignals = activeSignals.filter(s => s.signal_type === 'SELL')
   const winningSignals = signals.filter(s => s.status === 'TP_HIT').length
   const losingSignals = signals.filter(s => s.status === 'SL_HIT').length
-
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -174,6 +239,15 @@ export default function DashboardPage() {
           </Card>
         </div>
       </div>
+
+      {/* OTP Dialog for Auto-Trade */}
+      <OTPDialog
+        isOpen={otpDialogOpen}
+        onClose={handleOtpDialogClose}
+        signal={pendingSignal}
+        onOrderPlaced={handleOrderPlaced}
+      />
     </div>
   )
 }
+

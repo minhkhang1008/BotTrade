@@ -15,7 +15,7 @@ from .storage.database import db
 from .adapters.dnse_adapter import DNSEAdapter, DNSEConfig, MockDNSEAdapter
 from .adapters.trading_service import TradingService, OrderSide, OrderType
 from .core.signal_engine import SignalEngine
-from .core.models import Bar, Signal
+from .core.models import Bar, Signal, SignalType, SignalStatus
 from .api.server import (
     app, 
     broadcast_bar_closed, 
@@ -23,6 +23,9 @@ from .api.server import (
     broadcast_system_status,
     set_dnse_status,
     set_trading_service,
+    set_watchlist_update_callback,
+    set_demo_mode_callback,
+    set_force_demo_signal_callback,
     app_state
 )
 
@@ -60,6 +63,7 @@ class BotTradeApp:
         self.trading_service: Optional[TradingService] = None
         self._main_loop: Optional[asyncio.AbstractEventLoop] = None
         self._running = False
+        self._current_symbols: list[str] = []
     
     def _create_signal_engine(self, symbol: str) -> SignalEngine:
         """Create a signal engine for a symbol."""
@@ -177,6 +181,114 @@ class BotTradeApp:
                 lambda: asyncio.create_task(broadcast_system_status("disconnected", False))
             )
     
+    async def update_watchlist(self, new_symbols: list[str]):
+        """
+        Update the watchlist dynamically.
+        Subscribes to new symbols and unsubscribes from removed ones.
+        """
+        new_symbols = [s.upper() for s in new_symbols]
+        old_symbols = self._current_symbols.copy()
+        
+        # Find symbols to add and remove
+        to_add = [s for s in new_symbols if s not in old_symbols]
+        to_remove = [s for s in old_symbols if s not in new_symbols]
+        
+        # Unsubscribe from removed symbols
+        for symbol in to_remove:
+            if self.dnse_adapter:
+                if hasattr(self.dnse_adapter, 'unsubscribe'):
+                    self.dnse_adapter.unsubscribe(symbol)
+            if symbol in self.signal_engines:
+                del self.signal_engines[symbol]
+            logger.info(f"📤 Removed {symbol} from watchlist")
+        
+        # Subscribe to new symbols
+        for symbol in to_add:
+            if self.dnse_adapter:
+                if hasattr(self.dnse_adapter, 'subscribe'):
+                    self.dnse_adapter.subscribe(symbol)
+            
+            # Create signal engine for new symbol
+            self.signal_engines[symbol] = self._create_signal_engine(symbol)
+            
+            # Load historical bars if available
+            historical = await db.get_bars(symbol, settings.timeframe, limit=200)
+            if historical:
+                self.signal_engines[symbol].load_bars(historical)
+                logger.info(f"Loaded {len(historical)} bars for {symbol}")
+            
+            logger.info(f"📥 Added {symbol} to watchlist")
+        
+        self._current_symbols = new_symbols
+        logger.info(f"📊 Watchlist updated: {new_symbols}")
+
+    async def start_demo_mode(self):
+        """
+        Start demo mode - generates mock bars that lead to signals.
+        This is for presentation purposes.
+        
+        In demo mode:
+        1. Reset signal engines (clear old bars/pivots)
+        2. Generate bars that will trigger a BUY signal
+        """
+        if not self.use_mock:
+            logger.warning("Demo mode only available in mock mode")
+            return
+        
+        if not isinstance(self.dnse_adapter, MockDNSEAdapter):
+            logger.warning("Demo mode requires MockDNSEAdapter")
+            return
+        
+        logger.info("🎬 Starting demo mode...")
+        
+        # Reset signal engines for demo (clear old data to start fresh)
+        for symbol in self._current_symbols:
+            if symbol in self.signal_engines:
+                self.signal_engines[symbol].reset()
+                logger.info(f"🔄 Reset signal engine for {symbol}")
+        
+        # Start generating demo bars that will trigger a signal
+        asyncio.create_task(self.dnse_adapter.generate_demo_signal_scenario())
+
+    async def force_demo_signal(self, symbol: str = None) -> Signal:
+        """
+        Force generate a demo signal immediately.
+        This bypasses all normal signal conditions for testing/demo purposes.
+        
+        Args:
+            symbol: Optional symbol to generate signal for. Uses first watchlist symbol if None.
+        
+        Returns:
+            The generated Signal object
+        """
+        if not symbol:
+            symbol = self._current_symbols[0] if self._current_symbols else "VNM"
+        
+        symbol = symbol.upper()
+        
+        # Get or create signal engine
+        if symbol not in self.signal_engines:
+            self.signal_engines[symbol] = self._create_signal_engine(symbol)
+        
+        engine = self.signal_engines[symbol]
+        
+        # Get the latest bar for realistic prices (if available)
+        latest_bars = await db.get_bars(symbol, settings.timeframe, limit=1)
+        latest_bar = latest_bars[0] if latest_bars else None
+        
+        # Generate demo signal
+        signal = engine.generate_demo_signal(symbol, latest_bar)
+        
+        logger.info(f"🔔 DEMO SIGNAL FORCED: {signal.symbol} BUY @ {signal.entry:,.0f} | SL: {signal.stop_loss:,.0f} | TP: {signal.take_profit:,.0f}")
+        
+        # Save signal to database
+        await db.save_signal(signal)
+        
+        # Broadcast to WebSocket clients
+        await broadcast_signal(signal)
+        
+        return signal
+
     async def start(self):
         """Start the bot application."""
         self._running = True
@@ -184,9 +296,47 @@ class BotTradeApp:
         # Save reference to main event loop for thread-safe callbacks
         self._main_loop = asyncio.get_running_loop()
         
+        # Register callback for watchlist updates from API
+        set_watchlist_update_callback(self.update_watchlist)
+        
+        # Register demo mode callbacks (only works in mock mode)
+        if self.use_mock:
+            set_demo_mode_callback(self.start_demo_mode)
+            set_force_demo_signal_callback(self.force_demo_signal)
+        
         # Connect to database
         await db.connect()
         logger.info("Database ready")
+        
+        # Load watchlist from database (if exists), otherwise use .env settings
+        saved_watchlist = await db.get_setting("watchlist")
+        if saved_watchlist:
+            import json
+            try:
+                watchlist_from_db = json.loads(saved_watchlist)
+                if watchlist_from_db:
+                    logger.info(f"Loaded watchlist from database: {watchlist_from_db}")
+                    # Update app_state so API returns correct data
+                    app_state.current_settings["watchlist"] = watchlist_from_db
+                    self._current_symbols = watchlist_from_db
+            except json.JSONDecodeError:
+                logger.warning("Invalid watchlist in database, using .env")
+                self._current_symbols = settings.watchlist_symbols.copy()
+                app_state.current_settings["watchlist"] = self._current_symbols
+        else:
+            logger.info("No saved watchlist in database, using .env settings")
+            self._current_symbols = settings.watchlist_symbols.copy()
+            app_state.current_settings["watchlist"] = self._current_symbols
+        
+        # Load default_quantity from database if exists
+        saved_quantity = await db.get_setting("default_quantity")
+        if saved_quantity:
+            try:
+                app_state.current_settings["default_quantity"] = int(saved_quantity)
+            except ValueError:
+                app_state.current_settings["default_quantity"] = settings.default_quantity
+        else:
+            app_state.current_settings["default_quantity"] = settings.default_quantity
         
         # Initialize Trading Service (if configured)
         if settings.trading_configured:
@@ -201,8 +351,8 @@ class BotTradeApp:
                 if settings.auto_trade_enabled:
                     logger.warning("⚠️ AUTO-TRADE ENABLED - Bot will place real orders!")
         
-        # Initialize signal engines for watchlist
-        for symbol in settings.watchlist_symbols:
+        # Initialize signal engines for watchlist (use loaded symbols from DB or .env)
+        for symbol in self._current_symbols:
             self.signal_engines[symbol] = self._create_signal_engine(symbol)
             
             # Load historical bars
@@ -219,7 +369,7 @@ class BotTradeApp:
                 on_connected=self._on_connected,
                 on_disconnected=self._on_disconnected
             )
-            await self.dnse_adapter.connect(settings.watchlist_symbols, settings.timeframe)
+            await self.dnse_adapter.connect(self._current_symbols, settings.timeframe)
             asyncio.create_task(self.dnse_adapter.simulate_bars(interval_seconds=10))
         else:
             # Debug: print settings to see if env is loaded
@@ -239,11 +389,32 @@ class BotTradeApp:
                     on_connected=self._on_connected,
                     on_disconnected=self._on_disconnected
                 )
-                self.dnse_adapter.connect(settings.watchlist_symbols, settings.timeframe)
+                
+                # Fetch historical data for all symbols before connecting to live feed
+                logger.info("📊 Fetching historical data for signal analysis...")
+                for symbol in self._current_symbols:
+                    # Check if we already have enough bars
+                    existing_bars = await db.get_bars(symbol, settings.timeframe, limit=200)
+                    if len(existing_bars) < 50:
+                        # Fetch historical from DNSE
+                        historical_bars = await self.dnse_adapter.fetch_historical_bars(
+                            symbol, settings.timeframe, limit=200
+                        )
+                        if historical_bars:
+                            await db.save_bars(historical_bars)
+                            # Load into signal engine
+                            if symbol in self.signal_engines:
+                                self.signal_engines[symbol].load_bars(historical_bars)
+                            logger.info(f"✅ Fetched and saved {len(historical_bars)} bars for {symbol}")
+                    else:
+                        logger.info(f"Using {len(existing_bars)} cached bars for {symbol}")
+                
+                # Now connect to live feed
+                self.dnse_adapter.connect(self._current_symbols, settings.timeframe)
             else:
                 logger.warning("⚠️ DNSE credentials not found - API-only mode (set DNSE_USERNAME and DNSE_PASSWORD in .env)")
         
-        logger.info(f"🚀 Bot Trade started | Symbols: {settings.watchlist_symbols}")
+        logger.info(f"🚀 Bot Trade started | Symbols: {self._current_symbols}")
     
     async def stop(self):
         """Stop the bot application."""
@@ -262,8 +433,12 @@ class BotTradeApp:
         logger.info("Bot Trade stopped")
 
 
+# Check for mock mode from environment or command line args
+import os
+_use_mock_mode = os.environ.get("BOT_TRADE_MOCK_MODE", "false").lower() == "true"
+
 # Global app instance
-bot_app = BotTradeApp()
+bot_app = BotTradeApp(use_mock=_use_mock_mode)
 
 
 @app.on_event("startup")
@@ -286,10 +461,13 @@ def main():
     print(f"Auto-trade: {'ON ⚠️' if settings.auto_trade_enabled else 'OFF'}")
     print("="*50 + "\n")
     
-    # Check for mock mode
+    # Check for mock mode from command line
     use_mock = "--mock" in sys.argv
+    
+    # Set environment variable so child process also knows about mock mode
     if use_mock:
-        bot_app.use_mock = True
+        os.environ["BOT_TRADE_MOCK_MODE"] = "true"
+        print("🧪 MOCK MODE ENABLED")
     
     # Run API server
     uvicorn.run(

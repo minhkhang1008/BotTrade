@@ -52,4 +52,7 @@ export interface TradingStatus {
   auto_trade_enabled: boolean
   trading_token_valid: boolean
   account_no: string
-}
+  mock_mode: boolean
+  authenticated: boolean
+  active_symbols: string[]
+  signals_today: number

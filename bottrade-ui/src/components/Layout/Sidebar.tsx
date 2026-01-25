@@ -1,25 +1,80 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { BarChart3, TrendingUp, Settings, LineChart, AlertCircle, X } from 'lucide-react'
 import useAppStore from '../../store/appStore'
 import { useMedia } from 'react-use'
+import { useApi } from '../../hooks/useApi'
 
-const navigation = [
-  { name: 'Dashboard', href: '/', icon: BarChart3 },
-  { name: 'Chart', href: '/chart/VNM', icon: TrendingUp },
-  { name: 'Signals', href: '/signals', icon: AlertCircle },
-  { name: 'Analytics', href: '/analytics', icon: LineChart },
-  { name: 'Settings', href: '/settings', icon: Settings }
-]
+interface HealthStatus {
+  status: string
+  dnse_connected: boolean
+  timestamp: string
+  symbols: string[]
+}
+
+interface SettingsData {
+  watchlist: string[]
+}
 
 export default function Sidebar() {
-  const { sidebarOpen, toggleSidebar } = useAppStore()
+  const { sidebarOpen, toggleSidebar, signals } = useAppStore()
   const navigate = useNavigate()
   const location = useLocation()
   const isMobile = !useMedia('(min-width: 1024px)', false)
+  const { get } = useApi()
+  
+  const [health, setHealth] = useState<HealthStatus | null>(null)
+  const [firstSymbol, setFirstSymbol] = useState('VNM')
+
+  // Fetch health status
+  useEffect(() => {
+    const checkHealth = async () => {
+      try {
+        const response = await get('/api/v1/health')
+        setHealth(response.data as HealthStatus)
+      } catch (error) {
+        setHealth(null)
+      }
+    }
+    checkHealth()
+    const interval = setInterval(checkHealth, 10000)
+    return () => clearInterval(interval)
+  }, [])
+
+  // Fetch settings to get first symbol from watchlist - refresh when location changes
+  useEffect(() => {
+    const fetchSettings = async () => {
+      try {
+        const response = await get('/api/v1/settings')
+        const settings = response.data as SettingsData
+        if (settings.watchlist && settings.watchlist.length > 0) {
+          setFirstSymbol(settings.watchlist[0])
+        }
+      } catch (error) {
+        // Keep default VNM
+      }
+    }
+    fetchSettings()
+    // Also refresh periodically to catch updates
+    const interval = setInterval(fetchSettings, 5000)
+    return () => clearInterval(interval)
+  }, [location.pathname])
+
+  // Build navigation with dynamic chart URL
+  const navigation = [
+    { name: 'Dashboard', href: '/', icon: BarChart3 },
+    { name: 'Chart', href: `/chart/${firstSymbol}`, icon: TrendingUp },
+    { name: 'Signals', href: '/signals', icon: AlertCircle },
+    { name: 'Analytics', href: '/analytics', icon: LineChart },
+    { name: 'Settings', href: '/settings', icon: Settings }
+  ]
+
+  // Calculate active signals count
+  const activeSignalsCount = signals.filter(s => s.status === 'ACTIVE').length
 
   const isActive = (href: string) => {
     if (href === '/') return location.pathname === '/'
+    if (href.startsWith('/chart/')) return location.pathname.startsWith('/chart/')
     return location.pathname.startsWith(href)
   }
 
@@ -82,9 +137,9 @@ export default function Sidebar() {
             Quick Info
           </h4>
           <div className="space-y-1 text-xs text-gray-400">
-            <p>🟢 Bot Running</p>
-            <p>📊 5 Active Signals</p>
-            <p>💰 +1.2% Today</p>
+            <p>{health?.status === 'ok' ? '🟢' : '🔴'} Bot {health?.status === 'ok' ? 'Running' : 'Error'}</p>
+            <p>📊 {activeSignalsCount} Active Signal{activeSignalsCount !== 1 ? 's' : ''}</p>
+            <p>🔗 DNSE {health?.dnse_connected ? 'Connected' : 'Disconnected'}</p>
           </div>
         </div>
       </aside>

@@ -36,7 +36,7 @@ export default function ConnectionStatus() {
     }
 
     checkHealth()
-    const interval = setInterval(checkHealth, 10000) // Every 10 seconds
+    const interval = setInterval(checkHealth, 3000) // Every 3 seconds for real-time updates
 
     return () => clearInterval(interval)
   }, [])
