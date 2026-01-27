@@ -2,7 +2,7 @@ import { useEffect, useRef, ReactNode } from 'react'
 import useAppStore from '../store/appStore'
 
 interface WebSocketMessage {
-  event: 'system' | 'bar_closed' | 'signal'
+  event: 'system' | 'bar_closed' | 'signal' | 'signal_check'
   data: any
 }
 
@@ -107,6 +107,10 @@ export function useWebSocket() {
           break
         case 'bar_closed':
           store.addBar(message.data)
+          break
+        case 'signal_check':
+          console.log('[WS] 📊 Signal Check:', message.data)
+          store.setSignalCheck(message.data)
           break
         case 'signal':
           console.log('[WS] 🔔 NEW SIGNAL:', message.data)

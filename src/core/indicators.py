@@ -25,7 +25,9 @@ from .models import Bar, IndicatorValues
 
 def calculate_rsi(closes: List[float], period: int = 14) -> Optional[float]:
     """
-    Calculate RSI (Relative Strength Index).
+    Calculate RSI (Relative Strength Index) using Wilder's smoothing method.
+    
+    This is the standard RSI calculation used by TradingView and most platforms.
     
     Args:
         closes: List of closing prices
@@ -44,9 +46,15 @@ def calculate_rsi(closes: List[float], period: int = 14) -> Optional[float]:
     gains = _where_positive(deltas)
     losses = _where_negative_abs(deltas)
     
-    # Calculate average gains and losses using EMA
-    avg_gain = _mean(gains[-period:])
-    avg_loss = _mean(losses[-period:])
+    # Initial average using SMA for first period
+    avg_gain = _mean(gains[:period])
+    avg_loss = _mean(losses[:period])
+    
+    # Apply Wilder's smoothing for remaining values
+    # Formula: avg = (prev_avg * (period-1) + current) / period
+    for i in range(period, len(gains)):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
     
     if avg_loss == 0:
         return 100.0
@@ -54,7 +62,7 @@ def calculate_rsi(closes: List[float], period: int = 14) -> Optional[float]:
     rs = avg_gain / avg_loss
     rsi = 100 - (100 / (1 + rs))
     
-    return float(rsi)
+    return round(float(rsi), 2)
 
 
 def calculate_rsi_series(closes: List[float], period: int = 14) -> List[Optional[float]]:

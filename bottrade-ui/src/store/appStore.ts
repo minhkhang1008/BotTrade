@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Signal, Bar, Settings } from '../types/api'
+import type { Signal, Bar, Settings, SignalCheck } from '../types/api'
 
 interface AppState {
   // UI State
@@ -22,6 +22,11 @@ interface AppState {
   // OTP Test State
   testOtpSignal: Signal | null
   setTestOtpSignal: (signal: Signal | null) => void
+
+  // Signal Check State (for demo visualization)
+  signalChecks: Map<string, SignalCheck>
+  setSignalCheck: (check: SignalCheck) => void
+  clearSignalChecks: () => void
 
   // Data State
   signals: Signal[]
@@ -64,6 +69,16 @@ export const useAppStore = create<AppState>(set => ({
   // OTP Test State
   testOtpSignal: null,
   setTestOtpSignal: (signal: Signal | null) => set({ testOtpSignal: signal }),
+
+  // Signal Check State (for demo visualization)
+  signalChecks: new Map(),
+  setSignalCheck: (check: SignalCheck) =>
+    set(state => {
+      const newChecks = new Map(state.signalChecks)
+      newChecks.set(check.symbol, check)
+      return { signalChecks: newChecks }
+    }),
+  clearSignalChecks: () => set({ signalChecks: new Map() }),
 
   // Data State
   signals: [],

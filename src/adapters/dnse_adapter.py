@@ -464,14 +464,24 @@ class DNSEAdapter:
                 timestamp = datetime.now()
             
             # Parse OHLCV - DNSE uses full names: 'open', 'high', 'low', 'close', 'volume'
+            # DNSE MQTT returns prices in thousands (68.9 = 68,900 VND)
+            # We normalize to actual VND to match chart API data
+            raw_open = float(data.get("open") or data.get("o", 0))
+            raw_high = float(data.get("high") or data.get("h", 0))
+            raw_low = float(data.get("low") or data.get("l", 0))
+            raw_close = float(data.get("close") or data.get("c", 0))
+            
+            # If price is less than 1000, it's in thousands - multiply by 1000
+            price_mult = 1000 if raw_close < 1000 else 1
+            
             bar = Bar(
                 symbol=data.get("symbol") or symbol,  # DNSE includes symbol in message
                 timeframe=timeframe,
                 timestamp=timestamp,
-                open=float(data.get("open") or data.get("o", 0)),
-                high=float(data.get("high") or data.get("h", 0)),
-                low=float(data.get("low") or data.get("l", 0)),
-                close=float(data.get("close") or data.get("c", 0)),
+                open=raw_open * price_mult,
+                high=raw_high * price_mult,
+                low=raw_low * price_mult,
+                close=raw_close * price_mult,
                 volume=float(data.get("volume") or data.get("v", 0))
             )
             
@@ -532,9 +542,13 @@ class DNSEAdapter:
         # Calculate time range
         now = int(time.time())
         
-        # Calculate 'from' based on timeframe and limit
+        # For hourly data, we need enough calendar time to get desired bars
+        # Trading hours: ~5 bars per day (9:30-14:30 with breaks)
+        # So for 200 hourly bars, we need at least 40 trading days = ~60 calendar days
         if timeframe == "1H":
-            from_time = now - (limit * 60 * 60)
+            # Request more days to ensure we get enough hourly bars
+            days_needed = max(60, limit // 4)  # At least 60 days or limit/4
+            from_time = now - (days_needed * 24 * 60 * 60)
         elif timeframe == "4H":
             from_time = now - (limit * 4 * 60 * 60)
         elif timeframe == "1D":
@@ -542,14 +556,14 @@ class DNSEAdapter:
         elif timeframe == "1W":
             from_time = now - (limit * 7 * 24 * 60 * 60)
         else:
-            from_time = now - (limit * 60 * 60)
+            from_time = now - (60 * 24 * 60 * 60)  # Default 60 days
         
-        # List of chart APIs to try (in order)
+        # List of chart APIs to try (in order of reliability)
         chart_apis = [
-            # SSI iBoard (usually works)
+            # VNDirect (most reliable as of 2026)
+            f"https://dchart-api.vndirect.com.vn/dchart/history?symbol={symbol}&resolution={resolution}&from={from_time}&to={now}",
+            # SSI iBoard (backup)
             f"https://iboard.ssi.com.vn/dchart/api/history?symbol={symbol}&resolution={resolution}&from={from_time}&to={now}",
-            # Fireant
-            f"https://restv2.fireant.vn/symbols/{symbol}/historical-quotes?startDate={(datetime.now() - __import__('datetime').timedelta(days=limit)).strftime('%Y-%m-%d')}&endDate={datetime.now().strftime('%Y-%m-%d')}&offset=0&limit={limit}",
             # TCBS (backup)
             f"https://apipubaws.tcbs.com.vn/stock-insight/v1/stock/bars-long-term?ticker={symbol}&type=stock&resolution={resolution}&from={from_time}&to={now}",
         ]
@@ -635,8 +649,14 @@ class DNSEAdapter:
 
 class MockDNSEAdapter:
     """
-    Mock adapter for testing without DNSE connection.
-    Simulates bar data for development.
+    Mock adapter for testing/demo without DNSE connection.
+    Generates a deterministic sequence of bars that WILL trigger BUY signals.
+    
+    Signal conditions required:
+    1. Uptrend: 4 pivot lows increasing + 4 pivot highs increasing
+    2. Price in support zone (near last pivot low)
+    3. Bullish reversal pattern (Hammer)
+    4. Confirmation: RSI > 50
     """
     
     def __init__(
@@ -657,6 +677,8 @@ class MockDNSEAdapter:
         self._task: Optional[asyncio.Task] = None
         self._demo_mode_active = False
         self._bar_count = 0  # Track number of bars generated
+        self._demo_phase = {}  # Track demo phase per symbol
+        self._demo_bars_in_phase = {}  # Bars generated in current phase
     
     @property
     def is_connected(self) -> bool:
@@ -666,6 +688,11 @@ class MockDNSEAdapter:
         """Simulate connection."""
         self._symbols = symbols
         self._connected = True
+        
+        # Initialize demo tracking for each symbol
+        for symbol in symbols:
+            self._demo_phase[symbol] = 0
+            self._demo_bars_in_phase[symbol] = 0
         
         if self.on_connected:
             self.on_connected()
@@ -685,74 +712,283 @@ class MockDNSEAdapter:
         
         logger.info("Mock DNSE adapter disconnected")
     
-    async def simulate_bars(self, interval_seconds: float = 5.0):
-        """Generate simulated bars for testing. These are realistic bars that can trigger signals."""
+    def _create_hammer(self, base_price: float, make_higher_low: bool = True, prev_low: float = 0) -> dict:
+        """
+        Create a perfect Hammer pattern bar.
+        Hammer: small body at top, long lower wick (lower > 2x body), small upper wick.
+        """
+        import random
+        
+        # Ensure higher low if needed
+        if make_higher_low and prev_low > 0:
+            low = prev_low * (1 + random.uniform(0.005, 0.015))  # Higher than previous low
+        else:
+            low = base_price * (1 - random.uniform(0.02, 0.035))
+        
+        # Small body at top - bullish close
+        body_size = base_price * random.uniform(0.003, 0.006)
+        open_price = low + (base_price - low) * 0.85  # Open near the top
+        close = open_price + body_size  # Close slightly above open (bullish)
+        
+        # Long lower wick (must be > 2x body for hammer detection)
+        lower_wick = open_price - low  # This should be >> body_size
+        
+        # Small upper wick (< body size)
+        high = close + body_size * random.uniform(0.2, 0.5)
+        
+        return {
+            'open': open_price,
+            'high': high,
+            'low': low,
+            'close': close
+        }
+    
+    def _create_shooting_star(self, base_price: float, make_higher_high: bool = True, prev_high: float = 0) -> dict:
+        """
+        Create a perfect Shooting Star pattern bar.
+        Shooting Star: small body at bottom, long upper wick (upper > 2x body), small lower wick.
+        """
+        import random
+        
+        # Ensure higher high if needed
+        if make_higher_high and prev_high > 0:
+            high = prev_high * (1 + random.uniform(0.008, 0.02))  # Higher than previous high
+        else:
+            high = base_price * (1 + random.uniform(0.025, 0.04))
+        
+        # Small body at bottom - bearish close
+        body_size = base_price * random.uniform(0.003, 0.006)
+        close = base_price - body_size * 0.5  # Close below open (bearish)
+        open_price = close + body_size
+        
+        # Small lower wick
+        low = close - body_size * random.uniform(0.2, 0.5)
+        
+        return {
+            'open': open_price,
+            'high': high,
+            'low': low,
+            'close': close
+        }
+    
+    def _create_bullish_bar(self, base_price: float) -> dict:
+        """Create a simple bullish (green) bar."""
+        import random
+        change = base_price * random.uniform(0.008, 0.018)
+        open_price = base_price
+        close = base_price + change
+        high = close * (1 + random.uniform(0.002, 0.005))
+        low = open_price * (1 - random.uniform(0.002, 0.005))
+        return {'open': open_price, 'high': high, 'low': low, 'close': close}
+    
+    def _create_bearish_bar(self, base_price: float) -> dict:
+        """Create a simple bearish (red) bar."""
+        import random
+        change = base_price * random.uniform(0.005, 0.012)
+        open_price = base_price
+        close = base_price - change
+        high = open_price * (1 + random.uniform(0.002, 0.004))
+        low = close * (1 - random.uniform(0.002, 0.005))
+        return {'open': open_price, 'high': high, 'low': low, 'close': close}
+
+    async def simulate_bars(self, interval_seconds: float = 2.0):
+        """
+        Generate a DETERMINISTIC sequence of bars that WILL trigger a BUY signal.
+        
+        FAST DEMO MODE (~60 seconds):
+        - Only runs 1 symbol (first in watchlist) for faster demo
+        - 4 waves × ~4 bars = 16 bars for pivots
+        - 2 init bars + 3 pre-trigger bars = 5 bars
+        - Total: ~21 bars × 2 seconds = ~42 seconds per signal
+        """
         import random
         
         self._running = True
-        base_prices = {symbol: 50000 + random.random() * 50000 for symbol in self._symbols}
-        trend_direction = {symbol: 1 for symbol in self._symbols}  # 1 = up, -1 = down
-        trend_bars = {symbol: 0 for symbol in self._symbols}  # Counter for trend
+        
+        # DEMO MODE: Only use FIRST symbol for faster demo
+        demo_symbols = [self._symbols[0]] if self._symbols else []
+        if not demo_symbols:
+            logger.warning("🎬 Demo: No symbols in watchlist!")
+            return
+        
+        logger.info(f"🎬 Demo: Running with 1 symbol only: {demo_symbols[0]} (full watchlist: {self._symbols})")
+        
+        # Initialize state for demo symbol only
+        symbol_state = {}
+        for symbol in demo_symbols:
+            base_price = 50000 + random.random() * 30000
+            symbol_state[symbol] = {
+                'price': base_price,
+                'phase': 'init',  # init, upwave, pivot_high, downwave, pivot_low, pre_trigger, trigger
+                'wave': 0,
+                'bar_in_wave': 0,
+                'pivot_lows': [],  # Track pivot low prices
+                'pivot_highs': [],  # Track pivot high prices
+                'last_low': 0,
+                'last_high': 0,
+                'bars_generated': 0,
+            }
+        
+        logger.info(f"🎬 Demo: Starting FAST signal sequence (~1 min) for {demo_symbols[0]}")
         
         while self._running:
-            for symbol in self._symbols:
-                # Initialize price for new symbols
-                if symbol not in base_prices:
-                    base_prices[symbol] = 50000 + random.random() * 50000
-                    trend_direction[symbol] = 1
-                    trend_bars[symbol] = 0
+            for symbol in demo_symbols:
+                state = symbol_state[symbol]
+                price = state['price']
+                phase = state['phase']
+                wave = state['wave']
+                bar_in_wave = state['bar_in_wave']
                 
-                self._bar_count += 1
-                base = base_prices[symbol]
-                trend_bars[symbol] += 1
+                bar_data = None
                 
-                # Create trending price movement with occasional pullbacks
-                # This creates a more realistic pattern that can satisfy signal conditions
+                # ============ PHASE: INIT - Just 2 bullish bars to start ============
+                if phase == 'init':
+                    bar_data = self._create_bullish_bar(price)
+                    state['bar_in_wave'] += 1
+                    if state['bar_in_wave'] >= 2:  # Reduced from 3
+                        state['phase'] = 'upwave'
+                        state['wave'] = 1
+                        state['bar_in_wave'] = 0
+                        logger.info(f"🎬 {symbol}: Starting wave 1 of uptrend")
                 
-                # Every 15-20 bars, potentially create a pattern that could trigger signal
-                if trend_bars[symbol] >= 15 and random.random() > 0.7:
-                    # Create a hammer pattern (bullish reversal)
-                    # Hammer: small body at top, long lower wick
-                    open_price = base * (1 + random.uniform(0.001, 0.003))
-                    close = open_price * (1 + random.uniform(0.001, 0.005))  # Close near/above open
-                    low = open_price * (1 - random.uniform(0.015, 0.025))  # Long lower wick
-                    high = max(open_price, close) * (1 + random.uniform(0.001, 0.003))  # Small upper wick
-                    logger.info(f"🎯 MockDNSE: Generated potential hammer pattern for {symbol}")
-                elif trend_direction[symbol] == 1:
-                    # Uptrend bar
-                    change = random.uniform(0.002, 0.012) * base
-                    open_price = base
-                    close = base + change
-                    high = close * (1 + random.uniform(0.001, 0.005))
-                    low = open_price * (1 - random.uniform(0.001, 0.003))
-                else:
-                    # Pullback bar
-                    change = random.uniform(0.002, 0.008) * base
-                    open_price = base
-                    close = base - change
-                    high = open_price * (1 + random.uniform(0.001, 0.003))
-                    low = close * (1 - random.uniform(0.001, 0.005))
+                # ============ PHASE: UPWAVE - Just 1-2 bullish bars ============
+                elif phase == 'upwave':
+                    bar_data = self._create_bullish_bar(price)
+                    state['bar_in_wave'] += 1
+                    
+                    # After 1-2 bullish bars, create shooting star (pivot high)
+                    if state['bar_in_wave'] >= random.randint(1, 2):  # Reduced from 2-3
+                        state['phase'] = 'pivot_high'
+                        state['bar_in_wave'] = 0
                 
-                # Switch trend direction periodically
-                if trend_bars[symbol] > 8 and random.random() > 0.85:
-                    trend_direction[symbol] = -trend_direction[symbol]
-                    trend_bars[symbol] = 0
+                # ============ PHASE: PIVOT_HIGH - Create Shooting Star ============
+                elif phase == 'pivot_high':
+                    bar_data = self._create_shooting_star(
+                        price, 
+                        make_higher_high=True, 
+                        prev_high=state['last_high']
+                    )
+                    state['pivot_highs'].append(bar_data['high'])
+                    state['last_high'] = bar_data['high']
+                    logger.info(f"🎬 {symbol}: Pivot HIGH #{len(state['pivot_highs'])} at {bar_data['high']:.0f}")
+                    
+                    state['phase'] = 'downwave'
+                    state['bar_in_wave'] = 0
                 
-                bar = Bar(
-                    symbol=symbol,
-                    timeframe="1H",
-                    timestamp=datetime.now(),
-                    open=open_price,
-                    high=high,
-                    low=low,
-                    close=close,
-                    volume=random.randint(100000, 1000000)
-                )
+                # ============ PHASE: DOWNWAVE - Just 1 bearish bar ============
+                elif phase == 'downwave':
+                    bar_data = self._create_bearish_bar(price)
+                    state['bar_in_wave'] += 1
+                    
+                    # After just 1 bearish bar, create hammer (pivot low) - faster!
+                    if state['bar_in_wave'] >= 1:  # Reduced from 2
+                        state['phase'] = 'pivot_low'
+                        state['bar_in_wave'] = 0
                 
-                base_prices[symbol] = close
+                # ============ PHASE: PIVOT_LOW - Create Hammer ============
+                elif phase == 'pivot_low':
+                    bar_data = self._create_hammer(
+                        price,
+                        make_higher_low=True,
+                        prev_low=state['last_low']
+                    )
+                    state['pivot_lows'].append(bar_data['low'])
+                    state['last_low'] = bar_data['low']
+                    logger.info(f"🎬 {symbol}: Pivot LOW #{len(state['pivot_lows'])} at {bar_data['low']:.0f}")
+                    
+                    state['wave'] += 1
+                    
+                    # Check if we have enough pivots (need 4 of each)
+                    if len(state['pivot_lows']) >= 4 and len(state['pivot_highs']) >= 4:
+                        state['phase'] = 'pre_trigger'  # Add RSI boost phase
+                        state['bar_in_wave'] = 0
+                        logger.info(f"🎬 {symbol}: Uptrend complete! Preparing for signal...")
+                    else:
+                        state['phase'] = 'upwave'
+                        state['bar_in_wave'] = 0
                 
-                if self.on_bar_closed:
-                    self.on_bar_closed(bar)
+                # ============ PHASE: PRE_TRIGGER - Just 3 bullish bars to boost RSI ============
+                elif phase == 'pre_trigger':
+                    # Generate strong bullish bars to ensure RSI > 50
+                    bar_data = self._create_bullish_bar(price)
+                    # Make it extra bullish
+                    bar_data['close'] = bar_data['close'] * 1.008  # Stronger bullish
+                    bar_data['high'] = bar_data['close'] * 1.003
+                    state['bar_in_wave'] += 1
+                    
+                    # After just 3 bullish bars, RSI should be > 50, then trigger
+                    if state['bar_in_wave'] >= 3:  # Reduced from 4
+                        state['phase'] = 'trigger'
+                        state['bar_in_wave'] = 0
+                        logger.info(f"🎬 {symbol}: RSI boosted! Creating trigger bar...")
+                
+                # ============ PHASE: TRIGGER - Final Hammer at support ============
+                elif phase == 'trigger':
+                    # Create hammer with LONG LOWER WICK that reaches support zone
+                    # The body stays high (preserving RSI), but the wick touches support
+                    support_price = state['pivot_lows'][-1]
+                    
+                    # Calculate ATR-like zone width (about 1.5% of price)
+                    zone_width = support_price * 0.015
+                    
+                    # Hammer: body at top, long lower wick reaching into support zone
+                    # Open and close near current price (high)
+                    open_price = price * 0.998  # Slight dip at open
+                    close = price * 1.003  # Close higher (bullish)
+                    body_size = close - open_price
+                    
+                    # Lower wick reaches down to support zone
+                    # This is the key - long wick touches support but body stays high
+                    low = support_price * random.uniform(0.998, 1.002)  # In support zone
+                    
+                    # Small upper wick
+                    high = close * 1.001
+                    
+                    bar_data = {
+                        'open': open_price,
+                        'high': high,
+                        'low': low,
+                        'close': close
+                    }
+                    
+                    # Check hammer criteria: lower_wick > 2 * body, upper_wick < body
+                    lower_wick = open_price - low
+                    upper_wick = high - close
+                    logger.info(f"🎯 {symbol}: TRIGGER BAR!")
+                    logger.info(f"🎯 {symbol}: O:{open_price:.0f} H:{high:.0f} L:{low:.0f} C:{close:.0f}")
+                    logger.info(f"🎯 {symbol}: Body:{body_size:.0f} LowerWick:{lower_wick:.0f} (>{body_size*2:.0f}?) UpperWick:{upper_wick:.0f}")
+                    logger.info(f"🎯 {symbol}: Support zone: {support_price:.0f} ± {zone_width:.0f}")
+                    logger.info(f"🎯 {symbol}: Pivot Lows: {[f'{p:.0f}' for p in state['pivot_lows']]}")
+                    logger.info(f"🎯 {symbol}: Pivot Highs: {[f'{p:.0f}' for p in state['pivot_highs']]}")
+                    
+                    # Reset for next cycle
+                    state['phase'] = 'init'
+                    state['wave'] = 0
+                    state['bar_in_wave'] = 0
+                    state['pivot_lows'] = []
+                    state['pivot_highs'] = []
+                    state['last_low'] = 0
+                    state['last_high'] = 0
+                    # Keep price for continuity
+                
+                # Create and emit bar
+                if bar_data:
+                    bar = Bar(
+                        symbol=symbol,
+                        timeframe="1H",
+                        timestamp=datetime.now(),
+                        open=bar_data['open'],
+                        high=bar_data['high'],
+                        low=bar_data['low'],
+                        close=bar_data['close'],
+                        volume=random.randint(200000, 800000)
+                    )
+                    
+                    state['price'] = bar_data['close']
+                    state['bars_generated'] += 1
+                    
+                    if self.on_bar_closed:
+                        self.on_bar_closed(bar)
             
             await asyncio.sleep(interval_seconds)
     
@@ -760,6 +996,9 @@ class MockDNSEAdapter:
         """Subscribe to a new symbol (mock)."""
         if symbol not in self._symbols:
             self._symbols.append(symbol)
+            # Initialize demo tracking
+            self._demo_phase[symbol] = 0
+            self._demo_bars_in_phase[symbol] = 0
             logger.info(f"Mock: Subscribed to {symbol}")
     
     def unsubscribe(self, symbol: str):
@@ -770,172 +1009,8 @@ class MockDNSEAdapter:
 
     async def generate_demo_signal_scenario(self):
         """
-        Generate a sequence of bars that will trigger a BUY signal.
-        
-        The signal engine requires ALL of these conditions:
-        1. Uptrend: 4 consecutive higher pivot lows + 4 consecutive higher pivot highs
-        2. Price touches support zone (near last pivot low)
-        3. Bullish reversal pattern (Hammer or Bullish Engulfing)
-        4. Confirmation: MACD crossover OR RSI > 50
-        
-        Strategy:
-        - Generate bars with clear hammer/engulfing patterns at key points
-        - Create rising lows and rising highs
-        - End with a pullback to support + hammer pattern
+        Legacy method - now simulate_bars automatically generates signal scenarios.
+        This is kept for backwards compatibility.
         """
-        import random
-        from datetime import timedelta
-        
-        if not self._symbols:
-            logger.warning("No symbols to generate demo for")
-            return
-        
-        self._demo_mode_active = True
-        symbol = self._symbols[0]
-        base_price = 50000.0
-        
-        logger.info(f"🎬 Demo: Starting signal scenario for {symbol}")
-        logger.info(f"🎬 Demo: Generating uptrend with pivot patterns...")
-        
-        # ============ PHASE 1: Build uptrend with CLEAR pivot patterns ============
-        # We need to create bars that will be detected as pivot highs and lows
-        # Pivot Low = Hammer or Bullish Engulfing pattern
-        # Pivot High = Shooting Star or Bearish Engulfing pattern
-        
-        bars_generated = []
-        price = base_price
-        pivot_low_prices = []
-        pivot_high_prices = []
-        
-        # Generate a realistic uptrend with 5 clear pivot lows and 5 clear pivot highs
-        for wave in range(5):
-            # --- Downswing (creates PIVOT LOW at bottom) ---
-            # 2-3 bearish bars going down
-            for i in range(random.randint(2, 3)):
-                open_p = price
-                close_p = price * (1 - random.uniform(0.005, 0.012))
-                high_p = open_p * (1 + random.uniform(0.001, 0.003))
-                low_p = close_p * (1 - random.uniform(0.002, 0.005))
-                
-                bar = Bar(symbol=symbol, timeframe="1H", timestamp=datetime.now() - timedelta(hours=50-len(bars_generated)),
-                         open=open_p, high=high_p, low=low_p, close=close_p, volume=random.randint(200000, 500000))
-                bars_generated.append(bar)
-                price = close_p
-                
-                if self.on_bar_closed:
-                    self.on_bar_closed(bar)
-                await asyncio.sleep(0.2)
-            
-            # --- HAMMER pattern (creates PIVOT LOW) ---
-            # Hammer: small body at top, long lower wick (lower_wick > 2 * body)
-            pivot_low_price = price * (1 - random.uniform(0.01, 0.015))  # New low
-            open_p = pivot_low_price * 1.005
-            close_p = open_p * (1 + random.uniform(0.002, 0.005))  # Bullish close
-            body_size = close_p - open_p
-            low_p = open_p - (body_size * random.uniform(2.5, 4))  # Long lower wick
-            high_p = close_p * (1 + random.uniform(0.001, 0.002))  # Small upper wick
-            
-            bar = Bar(symbol=symbol, timeframe="1H", timestamp=datetime.now() - timedelta(hours=50-len(bars_generated)),
-                     open=open_p, high=high_p, low=low_p, close=close_p, volume=random.randint(400000, 800000))
-            bars_generated.append(bar)
-            pivot_low_prices.append(bar.low)
-            price = close_p
-            
-            logger.info(f"🎬 Demo: Created pivot low #{wave+1} at {bar.low:.0f} (Hammer)")
-            
-            if self.on_bar_closed:
-                self.on_bar_closed(bar)
-            await asyncio.sleep(0.3)
-            
-            # --- Upswing (creates PIVOT HIGH at top) ---
-            # 3-4 bullish bars going up
-            for i in range(random.randint(3, 4)):
-                open_p = price
-                close_p = price * (1 + random.uniform(0.008, 0.015))
-                high_p = close_p * (1 + random.uniform(0.002, 0.005))
-                low_p = open_p * (1 - random.uniform(0.001, 0.003))
-                
-                bar = Bar(symbol=symbol, timeframe="1H", timestamp=datetime.now() - timedelta(hours=50-len(bars_generated)),
-                         open=open_p, high=high_p, low=low_p, close=close_p, volume=random.randint(250000, 600000))
-                bars_generated.append(bar)
-                price = close_p
-                
-                if self.on_bar_closed:
-                    self.on_bar_closed(bar)
-                await asyncio.sleep(0.2)
-            
-            # --- SHOOTING STAR pattern (creates PIVOT HIGH) ---
-            # Shooting Star: small body at bottom, long upper wick
-            open_p = price
-            close_p = price * (1 - random.uniform(0.002, 0.005))  # Bearish close
-            body_size = open_p - close_p
-            high_p = open_p + (body_size * random.uniform(2.5, 4))  # Long upper wick
-            low_p = close_p * (1 - random.uniform(0.001, 0.002))  # Small lower wick
-            
-            bar = Bar(symbol=symbol, timeframe="1H", timestamp=datetime.now() - timedelta(hours=50-len(bars_generated)),
-                     open=open_p, high=high_p, low=low_p, close=close_p, volume=random.randint(350000, 700000))
-            bars_generated.append(bar)
-            pivot_high_prices.append(bar.high)
-            price = close_p
-            
-            logger.info(f"🎬 Demo: Created pivot high #{wave+1} at {bar.high:.0f} (Shooting Star)")
-            
-            if self.on_bar_closed:
-                self.on_bar_closed(bar)
-            await asyncio.sleep(0.3)
-        
-        # Check if we have higher highs and higher lows
-        logger.info(f"🎬 Demo: Pivot lows: {[f'{p:.0f}' for p in pivot_low_prices]}")
-        logger.info(f"🎬 Demo: Pivot highs: {[f'{p:.0f}' for p in pivot_high_prices]}")
-        
-        # ============ PHASE 2: Pullback to support zone ============
-        logger.info(f"🎬 Demo: Creating pullback to support zone...")
-        
-        support_zone = pivot_low_prices[-1]  # Last pivot low
-        target_price = support_zone * 1.01  # Just above support
-        
-        # Small pullback
-        for i in range(3):
-            open_p = price
-            close_p = price * (1 - random.uniform(0.005, 0.01))
-            high_p = open_p * (1 + random.uniform(0.001, 0.003))
-            low_p = close_p * (1 - random.uniform(0.002, 0.004))
-            
-            bar = Bar(symbol=symbol, timeframe="1H", timestamp=datetime.now() - timedelta(hours=5-i),
-                     open=open_p, high=high_p, low=low_p, close=close_p, volume=random.randint(200000, 450000))
-            bars_generated.append(bar)
-            price = close_p
-            
-            if self.on_bar_closed:
-                self.on_bar_closed(bar)
-            await asyncio.sleep(0.4)
-        
-        # ============ PHASE 3: Final HAMMER at support (TRIGGER) ============
-        logger.info(f"🎬 Demo: Creating trigger bar (Hammer at support)...")
-        
-        # Create a clear hammer pattern at support zone
-        open_p = price
-        close_p = price * 1.008  # Bullish close
-        body_size = close_p - open_p
-        low_p = support_zone * 0.995  # Touch into support zone
-        high_p = close_p * 1.002  # Small upper wick
-        
-        bar = Bar(
-            symbol=symbol, 
-            timeframe="1H", 
-            timestamp=datetime.now(),
-            open=open_p, 
-            high=high_p, 
-            low=low_p, 
-            close=close_p, 
-            volume=random.randint(500000, 900000)
-        )
-        
-        logger.info(f"🎬 Demo: TRIGGER BAR - O:{open_p:.0f} H:{high_p:.0f} L:{low_p:.0f} C:{close_p:.0f}")
-        logger.info(f"🎬 Demo: Support zone around: {support_zone:.0f}")
-        
-        if self.on_bar_closed:
-            self.on_bar_closed(bar)
-        
-        logger.info(f"🎬 Demo: Signal scenario complete! Check for BUY signal 🔔")
-        self._demo_mode_active = False
+        logger.info("🎬 Demo mode is now automatic in simulate_bars()")
+        logger.info("🎬 Signal will be generated after ~25-30 bars per symbol")

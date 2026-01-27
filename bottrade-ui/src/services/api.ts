@@ -19,9 +19,15 @@ class ApiClient {
     this.client.interceptors.response.use(
       response => response,
       error => {
+        // Don't redirect on 401 for trading authentication endpoints
+        // Let the component handle the error instead
         if (error.response?.status === 401) {
-          // Handle unauthorized
-          window.location.href = '/login'
+          const url = error.config?.url || ''
+          // Only redirect for non-trading endpoints
+          if (!url.includes('/trading/')) {
+            console.warn('Unauthorized request, consider redirecting to login')
+            // window.location.href = '/login'  // Disabled to prevent OTP flow crashes
+          }
         }
         return Promise.reject(error)
       }

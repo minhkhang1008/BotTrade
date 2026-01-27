@@ -19,7 +19,8 @@ from .core.models import Bar, Signal, SignalType, SignalStatus
 from .api.server import (
     app, 
     broadcast_bar_closed, 
-    broadcast_signal, 
+    broadcast_signal,
+    broadcast_signal_check,
     broadcast_system_status,
     set_dnse_status,
     set_trading_service,
@@ -115,6 +116,70 @@ class BotTradeApp:
             
             # Add bar and check for signal
             result = engine.add_bar(bar)
+            
+            # Broadcast signal check result for UI visualization
+            if result:
+                passed_count = len(result.reasons) if result.reasons else 0
+                failed_count = len(result.failed_conditions) if result.failed_conditions else 0
+                total_conditions = 4  # uptrend, support zone, pattern, confirmation
+                
+                # Get indicator values for display
+                indicators = {}
+                analysis_details = {}
+                
+                if hasattr(engine, 'bars') and len(engine.bars) > 0:
+                    from .core.indicators import get_all_indicators
+                    ind = get_all_indicators(
+                        engine.bars,
+                        engine.rsi_period,
+                        engine.macd_fast,
+                        engine.macd_slow,
+                        engine.macd_signal,
+                        engine.atr_period
+                    )
+                    indicators = {
+                        "rsi": round(ind.rsi, 2) if ind.rsi else None,
+                        "macd": round(ind.macd_line, 4) if ind.macd_line else None,
+                        "macd_signal": round(ind.macd_signal, 4) if ind.macd_signal else None,
+                        "atr": round(ind.atr, 2) if ind.atr else None,
+                    }
+                    
+                    # Get detailed analysis for UI
+                    pivot_lows = [{"price": p.price, "index": p.bar_index} for p in engine.pivot_detector.pivot_lows[-5:]]
+                    pivot_highs = [{"price": p.price, "index": p.bar_index} for p in engine.pivot_detector.pivot_highs[-5:]]
+                    
+                    # Get support zone info
+                    support_zone = None
+                    if ind.atr and engine.pivot_detector.pivot_lows:
+                        last_pivot = engine.pivot_detector.pivot_lows[-1]
+                        zone_width = engine.zone_width_atr_mult * ind.atr
+                        support_zone = {
+                            "pivot_price": last_pivot.price,
+                            "zone_low": last_pivot.price - zone_width,
+                            "zone_high": last_pivot.price + zone_width,
+                        }
+                    
+                    analysis_details = {
+                        "pivot_lows": pivot_lows,
+                        "pivot_highs": pivot_highs,
+                        "pivot_lows_count": len(engine.pivot_detector.pivot_lows),
+                        "pivot_highs_count": len(engine.pivot_detector.pivot_highs),
+                        "support_zone": support_zone,
+                        "bar_low": bar.low,
+                        "bar_high": bar.high,
+                        "total_bars": len(engine.bars),
+                    }
+                
+                await broadcast_signal_check(
+                    symbol=bar.symbol,
+                    bar_data=bar.to_dict(),
+                    conditions_passed=passed_count,
+                    total_conditions=total_conditions,
+                    passed=result.reasons or [],
+                    failed=result.failed_conditions or [],
+                    indicators=indicators,
+                    analysis_details=analysis_details
+                )
             
             if result and result.should_signal and result.signal:
                 signal = result.signal
@@ -437,23 +502,46 @@ class BotTradeApp:
 import os
 _use_mock_mode = os.environ.get("BOT_TRADE_MOCK_MODE", "false").lower() == "true"
 
-# Global app instance
-bot_app = BotTradeApp(use_mock=_use_mock_mode)
+# Global app instance - use lazy initialization to avoid double startup
+bot_app: Optional[BotTradeApp] = None
+_started = False
 
 
 @app.on_event("startup")
 async def on_startup():
+    global bot_app, _started
+    
+    # Prevent double startup
+    if _started:
+        logger.warning("on_startup called again, skipping (already started)")
+        return
+    _started = True
+    
+    bot_app = BotTradeApp(use_mock=_use_mock_mode)
     await bot_app.start()
 
 
 @app.on_event("shutdown")
 async def on_shutdown():
-    await bot_app.stop()
+    global bot_app, _started
+    if bot_app:
+        await bot_app.stop()
+    _started = False
 
 
 def main():
-    """Main entry point."""
-    print("\n" + "="*50)
+    """
+    Main entry point - DEPRECATED.
+    Use run.py instead to avoid double startup issue.
+    
+    Usage:
+        python run.py          # Normal mode
+        python run.py --mock   # Demo mode
+    """
+    print("\n⚠️  Please use 'python run.py' instead of 'python -m src.main'")
+    print("   This avoids the double startup issue.\n")
+    
+    print("="*50)
     print("🤖 BOT TRADE - Trading Signal Assistant")
     print("="*50)
     print(f"Symbols: {settings.watchlist_symbols}")
@@ -468,6 +556,7 @@ def main():
     if use_mock:
         os.environ["BOT_TRADE_MOCK_MODE"] = "true"
         print("🧪 MOCK MODE ENABLED")
+        print("📁 Using separate database: bottrade_demo.db")
     
     # Run API server
     uvicorn.run(

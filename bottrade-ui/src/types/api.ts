@@ -56,3 +56,47 @@ export interface TradingStatus {
   authenticated: boolean
   active_symbols: string[]
   signals_today: number
+}
+
+// Pivot point for analysis
+export interface PivotPoint {
+  price: number
+  index: number
+}
+
+// Support zone info
+export interface SupportZone {
+  pivot_price: number
+  zone_low: number
+  zone_high: number
+}
+
+// Analysis details for signal check
+export interface AnalysisDetails {
+  pivot_lows: PivotPoint[]
+  pivot_highs: PivotPoint[]
+  pivot_lows_count: number
+  pivot_highs_count: number
+  support_zone: SupportZone | null
+  bar_low: number
+  bar_high: number
+  total_bars: number
+}
+
+// Signal Check Progress (for demo visualization)
+export interface SignalCheck {
+  symbol: string
+  bar: Bar
+  conditions_passed: number
+  total_conditions: number
+  passed: string[]
+  failed: string[]
+  indicators: {
+    rsi?: number | null
+    macd?: number | null
+    macd_signal?: number | null
+    atr?: number | null
+  }
+  analysis?: AnalysisDetails
+  timestamp: string
+}

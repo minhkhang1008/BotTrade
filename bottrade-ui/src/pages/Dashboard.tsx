@@ -4,6 +4,7 @@ import { useApi } from '../hooks/useApi'
 import useAppStore from '../store/appStore'
 import ConnectionStatus from '../components/Common/ConnectionStatus'
 import ActiveSignalsCard from '../components/Common/ActiveSignalsCard'
+import SignalCheckCard from '../components/Common/SignalCheckCard'
 import { Card, CardGrid } from '../components/Common/Card'
 import OTPDialog from '../components/Trading/OTPDialog'
 import type { Signal, HealthStatus } from '../types/api'
@@ -172,6 +173,9 @@ export default function DashboardPage() {
           </div>
         </Card>
       </CardGrid>
+
+      {/* Signal Analysis - Live visualization of signal checks */}
+      <SignalCheckCard />
 
       {/* Main Content Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

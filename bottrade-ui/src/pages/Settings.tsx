@@ -6,21 +6,21 @@ import { Card } from '../components/Common/Card'
 import { AlertCircle, Check, Plus, X, Play, Zap } from 'lucide-react'
 import type { Signal } from '../types/api'
 
-// Test signal for OTP flow testing
-const TEST_SIGNAL: Signal = {
-  id: 99999,
-  symbol: 'VNM',
+// Signal used when clicking Authenticate button (authentication only, no order)
+const AUTH_SIGNAL: Signal = {
+  id: 0,
+  symbol: 'AUTH',
   signal_type: 'BUY',
   timestamp: new Date().toISOString(),
-  entry: 78500,
-  stop_loss: 76000,
-  take_profit: 83500,
-  quantity: 100,
-  status: 'ACTIVE',
-  reason: 'Test OTP Flow',
-  risk: 2500,
-  reward: 5000,
-  risk_reward_ratio: 2.0
+  entry: 0,
+  stop_loss: 0,
+  take_profit: 0,
+  quantity: 0,
+  status: 'PENDING',
+  reason: 'Manual Authentication',
+  risk: 0,
+  reward: 0,
+  risk_reward_ratio: 0
 }
 
 interface SettingsData {
@@ -568,17 +568,31 @@ export default function SettingsPage() {
             </div>
           )}
           
-          {/* Test OTP Flow Button */}
+          {/* Authenticate Button */}
           <button
             onClick={() => {
-              // Set test signal in global state and navigate
-              useAppStore.getState().setTestOtpSignal(TEST_SIGNAL)
+              // Set auth signal to open OTP dialog for authentication
+              useAppStore.getState().setTestOtpSignal(AUTH_SIGNAL)
               navigate('/')
             }}
-            className="w-full px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition flex items-center justify-center gap-2"
+            disabled={tradingStatus?.trading_token_valid}
+            className={`w-full px-4 py-3 rounded-lg transition flex items-center justify-center gap-2 ${
+              tradingStatus?.trading_token_valid
+                ? 'bg-green-700 text-green-200 cursor-not-allowed'
+                : 'bg-blue-600 hover:bg-blue-700 text-white'
+            }`}
           >
-            🔐 Test OTP Flow
-            <span className="text-xs text-blue-200">(Mở dialog đặt lệnh)</span>
+            {tradingStatus?.trading_token_valid ? (
+              <>
+                ✅ Đã xác thực
+                <span className="text-xs text-green-300">(Hiệu lực 8 tiếng)</span>
+              </>
+            ) : (
+              <>
+                🔐 Authenticate
+                <span className="text-xs text-blue-200">(Xác thực OTP cho Auto-Trade)</span>
+              </>
+            )}
           </button>
         </div>
       </Card>

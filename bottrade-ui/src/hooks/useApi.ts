@@ -27,9 +27,19 @@ export const useApi = () => {
 
   const post = useCallback(async (url: string, data: any) => {
     try {
-      return await apiClient.post(url, data)
-    } catch (error) {
-      throw new Error(handleError(error as AxiosError))
+      const response = await apiClient.post(url, data)
+      return response.data
+    } catch (error: any) {
+      // Re-throw with proper error structure for component handling
+      const axiosError = error as AxiosError
+      const errorData = {
+        response: {
+          data: axiosError.response?.data,
+          status: axiosError.response?.status
+        },
+        message: handleError(axiosError)
+      }
+      throw errorData
     }
   }, [handleError])
 

@@ -448,6 +448,23 @@ async def broadcast_signal(signal: Signal):
     await manager.broadcast("signal", signal.to_dict())
 
 
+async def broadcast_signal_check(symbol: str, bar_data: dict, conditions_passed: int, 
+                                  total_conditions: int, passed: list, failed: list,
+                                  indicators: dict = None, analysis_details: dict = None):
+    """Broadcast signal check progress for UI visualization."""
+    await manager.broadcast("signal_check", {
+        "symbol": symbol,
+        "bar": bar_data,
+        "conditions_passed": conditions_passed,
+        "total_conditions": total_conditions,
+        "passed": passed,
+        "failed": failed,
+        "indicators": indicators or {},
+        "analysis": analysis_details or {},
+        "timestamp": datetime.now().isoformat()
+    })
+
+
 async def broadcast_system_status(status: str, dnse_connected: bool):
     """Broadcast system status update."""
     await manager.broadcast("system", {
@@ -507,11 +524,12 @@ async def get_trading_status():
     
     # Count signals today
     signals_today = 0
-    if _db:
-        from datetime import datetime
+    try:
         today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        all_signals = _db.get_signals(limit=100)
+        all_signals = await db.get_signals(limit=100)
         signals_today = sum(1 for s in all_signals if s.timestamp >= today_start)
+    except Exception:
+        pass  # Database may not be connected yet
     
     # Get active symbols from watchlist
     active_symbols = app_settings.watchlist_symbols

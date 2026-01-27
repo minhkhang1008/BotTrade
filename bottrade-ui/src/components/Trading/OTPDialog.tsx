@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { X, Loader2, CheckCircle, AlertCircle, ShieldCheck } from 'lucide-react'
 import { useApi } from '../../hooks/useApi'
 import useAppStore from '../../store/appStore'
@@ -22,31 +22,53 @@ export default function OTPDialog({ isOpen, onClose, signal, onOrderPlaced }: OT
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string>('')
   const inputRefs = useRef<(HTMLInputElement | null)[]>([])
-
-  // Reset state when dialog opens
-  useEffect(() => {
-    if (isOpen && signal) {
-      setOtp(['', '', '', '', '', ''])
-      setError(null)
-      setStep('requesting')
-      requestOTP()
-    }
-  }, [isOpen, signal])
+  const hasRequestedOtp = useRef(false)  // Prevent double request
+  
+  // Check if this is auth-only mode (no real signal, just authenticate)
+  const isAuthOnly = signal?.symbol === 'AUTH' || signal?.id === 0
 
   // Request OTP from server
-  const requestOTP = async () => {
+  const requestOTP = useCallback(async () => {
+    // Prevent double request
+    if (hasRequestedOtp.current) {
+      console.log('[OTP] Already requested, skipping duplicate')
+      return
+    }
+    hasRequestedOtp.current = true
+    
     try {
       setStep('requesting')
       setError(null)
+      console.log('[OTP] Requesting OTP...')
       await post('/api/v1/trading/request-otp', {})
+      console.log('[OTP] OTP request successful')
       setStep('input')
       // Focus first input after a small delay
       setTimeout(() => inputRefs.current[0]?.focus(), 100)
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'Không thể gửi OTP. Vui lòng thử lại.')
+      console.error('[OTP] Request failed:', err)
+      setError(err?.response?.data?.detail || err?.message || 'Không thể gửi OTP. Vui lòng thử lại.')
       setStep('error')
     }
-  }
+  }, [post])
+
+  // Reset state when dialog opens
+  useEffect(() => {
+    if (isOpen && signal) {
+      console.log('[OTP] Dialog opened, resetting state')
+      setOtp(['', '', '', '', '', ''])
+      setError(null)
+      hasRequestedOtp.current = false  // Reset the flag
+      requestOTP()
+    }
+    
+    // Cleanup when dialog closes
+    return () => {
+      if (!isOpen) {
+        hasRequestedOtp.current = false
+      }
+    }
+  }, [isOpen])  // Only depend on isOpen, not signal
 
   // Handle OTP input change
   const handleOtpChange = (index: number, value: string) => {
@@ -79,9 +101,20 @@ export default function OTPDialog({ isOpen, onClose, signal, onOrderPlaced }: OT
     try {
       setStep('authenticating')
       setError(null)
-      await post('/api/v1/trading/authenticate', { otp: otpCode })
       
-      // Demo mode stops here
+      console.log('[OTP] Authenticating with OTP:', otpCode)
+      const response = await post('/api/v1/trading/authenticate', { otp: otpCode })
+      console.log('[OTP] Authentication response:', response)
+      
+      // Auth-only mode: Just authenticate, don't place order
+      if (isAuthOnly) {
+        setStep('success')
+        setMessage('✅ Xác thực thành công! Trading token có hiệu lực trong 8 tiếng. Bot có thể tự động đặt lệnh khi có signal.')
+        onOrderPlaced?.(true, 'Authentication successful')
+        return
+      }
+      
+      // Demo mode: Authenticate but don't place real order
       if (demoMode) {
         setStep('success')
         setMessage('🎭 Demo Mode: Xác thực thành công! Lệnh sẽ không được đặt thật.')
@@ -89,13 +122,19 @@ export default function OTPDialog({ isOpen, onClose, signal, onOrderPlaced }: OT
         return
       }
 
-      // Live mode: Place the order
+      // Live mode with real signal: Place the order
       await placeOrder()
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'OTP không hợp lệ hoặc đã hết hạn.')
+      console.error('[OTP] Authentication error:', err)
+      // Extract error message from various error formats
+      const errorMessage = 
+        err?.response?.data?.detail || 
+        err?.message || 
+        'OTP không hợp lệ hoặc đã hết hạn.'
+      setError(errorMessage)
       setStep('input')
       setOtp(['', '', '', '', '', ''])
-      inputRefs.current[0]?.focus()
+      setTimeout(() => inputRefs.current[0]?.focus(), 100)
     }
   }
 
@@ -139,7 +178,9 @@ export default function OTPDialog({ isOpen, onClose, signal, onOrderPlaced }: OT
         <div className="flex items-center justify-between p-4 border-b border-gray-700">
           <div className="flex items-center gap-2">
             <ShieldCheck className="w-5 h-5 text-blue-400" />
-            <h2 className="text-lg font-semibold text-white">Xác thực đặt lệnh</h2>
+            <h2 className="text-lg font-semibold text-white">
+              {isAuthOnly ? 'Xác thực Trading' : 'Xác thực đặt lệnh'}
+            </h2>
           </div>
           <button
             onClick={onClose}
@@ -151,8 +192,21 @@ export default function OTPDialog({ isOpen, onClose, signal, onOrderPlaced }: OT
 
         {/* Content */}
         <div className="p-6">
-          {/* Signal Info */}
-          {signal && (
+          {/* Auth-only mode info */}
+          {isAuthOnly && (
+            <div className="mb-6 p-4 bg-blue-900/30 rounded-lg border border-blue-600/50">
+              <div className="flex items-center gap-2 mb-2">
+                <ShieldCheck className="w-5 h-5 text-blue-400" />
+                <span className="text-blue-300 font-medium">Xác thực cho Auto-Trade</span>
+              </div>
+              <p className="text-sm text-gray-300">
+                Nhập mã OTP để xác thực. Sau khi xác thực, bot có thể tự động đặt lệnh trong <strong className="text-blue-300">8 tiếng</strong> tiếp theo.
+              </p>
+            </div>
+          )}
+          
+          {/* Signal Info - only show for real signals */}
+          {signal && !isAuthOnly && (
             <div className="mb-6 p-4 bg-gray-900 rounded-lg border border-gray-700">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-gray-400">Mã CK:</span>

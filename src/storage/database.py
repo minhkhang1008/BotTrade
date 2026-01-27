@@ -4,6 +4,7 @@ SQLite storage for bars and signals
 """
 import aiosqlite
 import json
+import os
 from datetime import datetime
 from typing import List, Optional
 from pathlib import Path
@@ -14,15 +15,30 @@ from ..core.models import Bar, Signal, SignalType, SignalStatus
 logger = logging.getLogger(__name__)
 
 
+def get_database_path() -> str:
+    """
+    Get database path based on mode.
+    Uses separate database for demo/mock mode to avoid mixing with real data.
+    """
+    is_mock_mode = os.environ.get("BOT_TRADE_MOCK_MODE", "false").lower() == "true"
+    if is_mock_mode:
+        return "bottrade_demo.db"
+    return "bottrade.db"
+
+
 class Database:
     """SQLite database for storing bars and signals."""
     
-    def __init__(self, db_path: str = "bottrade.db"):
-        self.db_path = db_path
+    def __init__(self, db_path: str = None):
+        # Use provided path or determine based on mode
+        self.db_path = db_path or get_database_path()
         self._connection: Optional[aiosqlite.Connection] = None
     
     async def connect(self):
         """Connect to database and create tables."""
+        # Re-determine db_path in case mode was set after initialization
+        if self.db_path in ["bottrade.db", "bottrade_demo.db"]:
+            self.db_path = get_database_path()
         self._connection = await aiosqlite.connect(self.db_path)
         await self._create_tables()
         logger.info(f"Connected to database: {self.db_path}")
