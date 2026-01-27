@@ -14,6 +14,7 @@ from .config import settings
 from .storage.database import db
 from .adapters.dnse_adapter import DNSEAdapter, DNSEConfig, MockDNSEAdapter
 from .adapters.trading_service import TradingService, OrderSide, OrderType
+from .adapters.notification_service import init_notification_service, get_notification_service
 from .core.signal_engine import SignalEngine
 from .core.models import Bar, Signal, SignalType, SignalStatus
 from .api.server import (
@@ -148,6 +149,12 @@ class BotTradeApp:
                     pivot_lows = [{"price": p.price, "index": p.bar_index} for p in engine.pivot_detector.pivot_lows[-5:]]
                     pivot_highs = [{"price": p.price, "index": p.bar_index} for p in engine.pivot_detector.pivot_highs[-5:]]
                     
+                    # Get trend analysis with higher lows/highs counts
+                    trend_result = engine.trend_analyzer.analyze(
+                        engine.pivot_detector.pivot_lows,
+                        engine.pivot_detector.pivot_highs
+                    )
+                    
                     # Get support zone info
                     support_zone = None
                     if ind.atr and engine.pivot_detector.pivot_lows:
@@ -164,6 +171,11 @@ class BotTradeApp:
                         "pivot_highs": pivot_highs,
                         "pivot_lows_count": len(engine.pivot_detector.pivot_lows),
                         "pivot_highs_count": len(engine.pivot_detector.pivot_highs),
+                        # Trend analysis results (consecutive higher pairs)
+                        "higher_lows_count": trend_result.higher_lows_count,
+                        "higher_highs_count": trend_result.higher_highs_count,
+                        "is_uptrend": trend_result.is_uptrend,
+                        "trend_reason": trend_result.reason,
                         "support_zone": support_zone,
                         "bar_low": bar.low,
                         "bar_high": bar.high,
@@ -190,6 +202,11 @@ class BotTradeApp:
                 
                 # Broadcast to WebSocket clients (for UI)
                 await broadcast_signal(signal)
+                
+                # Send Telegram notification (works even when web is closed)
+                notifier = get_notification_service()
+                if notifier and notifier.is_enabled:
+                    await notifier.send_signal_notification(signal)
                 
                 # Auto-trade: place order
                 if settings.auto_trade_enabled and self.trading_service:
@@ -516,6 +533,16 @@ async def on_startup():
         logger.warning("on_startup called again, skipping (already started)")
         return
     _started = True
+    
+    # Initialize notification service
+    notifier = init_notification_service(
+        bot_token=settings.telegram_bot_token,
+        chat_id=settings.telegram_chat_id
+    )
+    if notifier.is_enabled:
+        logger.info(f"📱 Telegram notifications: ENABLED")
+    else:
+        logger.info(f"📱 Telegram notifications: DISABLED (set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env)")
     
     bot_app = BotTradeApp(use_mock=_use_mock_mode)
     await bot_app.start()

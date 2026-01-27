@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from ..config import settings
 from ..storage.database import db
 from ..core.models import Signal, Bar, SignalStatus, SignalType
+from ..adapters.notification_service import get_notification_service
 
 logger = logging.getLogger(__name__)
 
@@ -728,4 +729,60 @@ async def force_demo_signal(request: ForceDemoSignalRequest = None):
             raise HTTPException(status_code=500, detail=str(e))
     else:
         raise HTTPException(status_code=503, detail="Force signal not available - bot not running in mock mode")
+
+
+# ============ Notification Endpoints ============
+
+@app.get("/api/v1/notification/status")
+async def get_notification_status():
+    """Get current notification configuration status."""
+    notifier = get_notification_service()
+    return {
+        "enabled": notifier.is_enabled if notifier else False,
+        "configured": settings.notification_configured,
+        "telegram_chat_id": settings.telegram_chat_id[:4] + "***" if settings.telegram_chat_id else None
+    }
+
+
+class NotificationConfigRequest(BaseModel):
+    bot_token: str
+    chat_id: str
+
+
+@app.post("/api/v1/notification/configure")
+async def configure_notification(request: NotificationConfigRequest):
+    """Configure Telegram notification (runtime only, not persisted to .env)."""
+    notifier = get_notification_service()
+    if not notifier:
+        raise HTTPException(status_code=503, detail="Notification service not initialized")
+    
+    notifier.configure(request.bot_token, request.chat_id)
+    
+    return {
+        "message": "Notification configured successfully",
+        "enabled": notifier.is_enabled
+    }
+
+
+@app.post("/api/v1/notification/test")
+async def test_notification():
+    """Send a test notification to verify Telegram setup."""
+    notifier = get_notification_service()
+    
+    if not notifier:
+        raise HTTPException(status_code=503, detail="Notification service not initialized")
+    
+    if not notifier.is_enabled:
+        raise HTTPException(
+            status_code=400, 
+            detail="Telegram not configured. Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env"
+        )
+    
+    success = await notifier.send_test_notification()
+    
+    if success:
+        return {"message": "Test notification sent successfully! Check your Telegram."}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to send test notification. Check bot token and chat ID.")
+
 

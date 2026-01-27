@@ -32,9 +32,12 @@ class TrendAnalyzer:
     Uptrend criteria:
     - 4 consecutive pivot lows (Low1 < Low2 < Low3 < Low4) = 3 pairs of higher lows
     - 4 consecutive pivot highs (High1 < High2 < High3 < High4) = 3 pairs of higher highs
+    
+    Only uses recent pivots to avoid noise from old historical data.
     """
     
     REQUIRED_PAIRS = 3  # 3 cặp đỉnh/đáy cao dần = cần 4 pivots
+    MAX_PIVOTS_FOR_TREND = 8  # Only consider last N pivots for trend analysis
     
     def __init__(self):
         pass
@@ -47,6 +50,9 @@ class TrendAnalyzer:
         """
         Analyze trend based on pivot points.
         
+        Only uses the most recent pivots (MAX_PIVOTS_FOR_TREND) to avoid 
+        noise from old historical data that may no longer be relevant.
+        
         Args:
             pivot_lows: List of pivot low points
             pivot_highs: List of pivot high points
@@ -54,11 +60,15 @@ class TrendAnalyzer:
         Returns:
             TrendAnalysisResult with trend status and details
         """
+        # Only use recent pivots to avoid historical noise
+        recent_lows = pivot_lows[-self.MAX_PIVOTS_FOR_TREND:] if len(pivot_lows) > self.MAX_PIVOTS_FOR_TREND else pivot_lows
+        recent_highs = pivot_highs[-self.MAX_PIVOTS_FOR_TREND:] if len(pivot_highs) > self.MAX_PIVOTS_FOR_TREND else pivot_highs
+        
         # Count consecutive higher lows
-        higher_lows = self._count_higher_pairs(pivot_lows)
+        higher_lows = self._count_higher_pairs(recent_lows)
         
         # Count consecutive higher highs
-        higher_highs = self._count_higher_pairs(pivot_highs)
+        higher_highs = self._count_higher_pairs(recent_highs)
         
         # Check if uptrend criteria met
         is_uptrend = (
@@ -126,7 +136,11 @@ class TrendAnalyzer:
         0.5 = Partial uptrend
         0.0 = No uptrend
         """
-        result = self.analyze(pivot_lows, pivot_highs)
+        # Only use recent pivots
+        recent_lows = pivot_lows[-self.MAX_PIVOTS_FOR_TREND:] if len(pivot_lows) > self.MAX_PIVOTS_FOR_TREND else pivot_lows
+        recent_highs = pivot_highs[-self.MAX_PIVOTS_FOR_TREND:] if len(pivot_highs) > self.MAX_PIVOTS_FOR_TREND else pivot_highs
+        
+        result = self.analyze(recent_lows, recent_highs)
         
         if result.is_uptrend:
             # Extra strength for additional pairs

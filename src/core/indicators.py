@@ -167,9 +167,16 @@ def calculate_macd(
     if not signal_ema:
         return None
     
+    # Get raw values
     macd_line = macd_line_values[-1]
     signal_line = signal_ema[-1]
     histogram = macd_line - signal_line
+    
+    # Normalize to thousands (like TradingView displays)
+    # This makes values comparable: -0.23 instead of -230
+    macd_line = macd_line / 1000
+    signal_line = signal_line / 1000
+    histogram = histogram / 1000
     
     return MACDResult(
         macd_line=macd_line,
@@ -211,10 +218,13 @@ def calculate_macd_series(
         if bar_idx < len(result):
             macd_line = macd_line_values[sig_idx + signal_period - 1]
             signal_line = signal_ema[sig_idx]
+            histogram = macd_line - signal_line
+            
+            # Normalize to thousands (like TradingView displays)
             result[bar_idx] = MACDResult(
-                macd_line=macd_line,
-                signal_line=signal_line,
-                histogram=macd_line - signal_line
+                macd_line=macd_line / 1000,
+                signal_line=signal_line / 1000,
+                histogram=histogram / 1000
             )
     
     return result

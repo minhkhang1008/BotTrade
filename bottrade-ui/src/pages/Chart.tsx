@@ -44,9 +44,22 @@ function SimplizeWidget({
   chartHeight = 400
 }: SimplizeWidgetProps) {
   const containerRef = useRef<HTMLDivElement>(null)
+  const prevTickersRef = useRef<string>('')
+  const isInitializedRef = useRef(false)
 
   useEffect(() => {
     if (!containerRef.current) return
+    
+    // Create a stable key for comparison
+    const tickersKey = tickers.join(',')
+    
+    // Skip if already initialized with same tickers
+    if (isInitializedRef.current && prevTickersRef.current === tickersKey) {
+      return
+    }
+    
+    prevTickersRef.current = tickersKey
+    isInitializedRef.current = true
 
     // Clear previous widget
     containerRef.current.innerHTML = ''

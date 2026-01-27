@@ -294,6 +294,11 @@ function SignalCheckItem({ check }: SignalCheckItemProps) {
   const pivotLowsCount = check.analysis?.pivot_lows_count || 0
   const pivotHighsCount = check.analysis?.pivot_highs_count || 0
   
+  // Get trend analysis results (consecutive higher pairs)
+  const higherLowsCount = check.analysis?.higher_lows_count || 0
+  const higherHighsCount = check.analysis?.higher_highs_count || 0
+  const isUptrend = check.analysis?.is_uptrend || false
+  
   // If signal is triggered, show Active Signal card instead
   if (isTriggered) {
     return (
@@ -435,24 +440,34 @@ function SignalCheckItem({ check }: SignalCheckItemProps) {
           <div className="flex items-center gap-2 mb-3">
             <TrendingUp className="w-4 h-4 text-blue-400" />
             <span className="text-sm font-medium text-white">Trend Analysis</span>
-            <span className="text-xs text-gray-500">
-              ({check.analysis.total_bars} bars analyzed)
-            </span>
+            {isUptrend ? (
+              <span className="text-xs px-2 py-0.5 bg-green-900/50 text-green-400 rounded">
+                ✓ Uptrend
+              </span>
+            ) : (
+              <span className="text-xs px-2 py-0.5 bg-gray-700 text-gray-400 rounded">
+                No Uptrend
+              </span>
+            )}
           </div>
           
           <div className="grid grid-cols-2 gap-4">
             <ProgressRing 
-              value={check.analysis.pivot_lows_count} 
-              max={4} 
-              color={check.analysis.pivot_lows_count >= 4 ? 'green' : 'blue'}
-              label="Pivot Lows"
+              value={higherLowsCount} 
+              max={3} 
+              color={higherLowsCount >= 3 ? 'green' : 'blue'}
+              label="Higher Lows"
             />
             <ProgressRing 
-              value={check.analysis.pivot_highs_count} 
-              max={4} 
-              color={check.analysis.pivot_highs_count >= 4 ? 'green' : 'blue'}
-              label="Pivot Highs"
+              value={higherHighsCount} 
+              max={3} 
+              color={higherHighsCount >= 3 ? 'green' : 'blue'}
+              label="Higher Highs"
             />
+          </div>
+          
+          <div className="mt-2 text-xs text-gray-500 text-center">
+            Need 3/3 consecutive pairs for uptrend • Using last 8 pivots
           </div>
           
           {check.analysis.pivot_lows.length > 0 && (
@@ -528,8 +543,8 @@ function SignalCheckItem({ check }: SignalCheckItemProps) {
       <div className="grid grid-cols-2 gap-2">
         <ConditionCard title="Uptrend" passed={hasUptrend} icon={TrendingUp}>
           {hasUptrend 
-            ? '✓ 4/4 Higher Lows & Highs' 
-            : `Lows: ${pivotLowsCount}/4 | Highs: ${pivotHighsCount}/4`}
+            ? '✓ 3/3 Higher Lows & Highs' 
+            : `HL: ${higherLowsCount}/3 | HH: ${higherHighsCount}/3`}
         </ConditionCard>
         <ConditionCard title="Support Zone" passed={hasSupport} icon={Target}>
           {hasSupport 
@@ -571,9 +586,10 @@ function SignalCheckItem({ check }: SignalCheckItemProps) {
 export default function SignalCheckCard() {
   const signalChecks = useAppStore(state => state.signalChecks)
   
-  // Convert Map to array and sort by timestamp (newest first)
+  // Convert Map to array and sort by symbol alphabetically (fixed position)
+  // This ensures symbols stay in the same position and don't jump around
   const checksArray = Array.from(signalChecks.values()).sort((a, b) => 
-    new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    a.symbol.localeCompare(b.symbol)
   )
 
   if (checksArray.length === 0) {

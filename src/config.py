@@ -69,6 +69,11 @@ class Settings(BaseSettings):
         alias="BACKTEST_POSITION_SIZE_PERCENT"
     )
     
+    # Telegram Notification Settings
+    telegram_bot_token: str = Field(default="", alias="TELEGRAM_BOT_TOKEN")
+    telegram_chat_id: str = Field(default="", alias="TELEGRAM_CHAT_ID")
+    telegram_enabled: bool = Field(default=True, alias="TELEGRAM_ENABLED")
+    
     @property
     def watchlist_symbols(self) -> List[str]:
         """Return watchlist as a list of symbols."""
@@ -78,6 +83,11 @@ class Settings(BaseSettings):
     def trading_configured(self) -> bool:
         """Check if trading is properly configured."""
         return bool(self.dnse_username and self.dnse_password and self.dnse_account_no)
+    
+    @property
+    def notification_configured(self) -> bool:
+        """Check if Telegram notification is properly configured."""
+        return bool(self.telegram_bot_token and self.telegram_chat_id and self.telegram_enabled)
     
     class Config:
         env_file = ".env"

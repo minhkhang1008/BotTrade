@@ -77,6 +77,11 @@ export interface AnalysisDetails {
   pivot_highs: PivotPoint[]
   pivot_lows_count: number
   pivot_highs_count: number
+  // Trend analysis results (consecutive higher pairs)
+  higher_lows_count?: number
+  higher_highs_count?: number
+  is_uptrend?: boolean
+  trend_reason?: string
   support_zone: SupportZone | null
   bar_low: number
   bar_high: number
