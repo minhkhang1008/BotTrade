@@ -6,16 +6,16 @@ Tài liệu kỹ thuật chi tiết về cách hoạt động của Bot Trade.
 
 ## Mục lục
 
-1. [Tổng quan hệ thống](https://www.google.com/search?q=%231-t%E1%BB%95ng-quan-h%E1%BB%87-th%E1%BB%91ng)
-2. [Kết nối DNSE Market Data](https://www.google.com/search?q=%232-k%E1%BA%BFt-n%E1%BB%91i-dnse-market-data)
-3. [Cấu trúc dữ liệu Bar (Nến)](https://www.google.com/search?q=%233-c%E1%BA%A5u-tr%C3%BAc-d%E1%BB%AF-li%E1%BB%87u-bar-n%E1%BA%BFn)
-4. [Chỉ báo kỹ thuật (Indicators)](https://www.google.com/search?q=%234-ch%E1%BB%89-b%C3%A1o-k%E1%BB%B9-thu%E1%BA%ADt-indicators)
-5. [Phát hiện Pivot Points](https://www.google.com/search?q=%235-ph%C3%A1t-hi%E1%BB%87n-pivot-points)
-6. [Phân tích xu hướng (Trend)](https://www.google.com/search?q=%236-ph%C3%A2n-t%C3%ADch-xu-h%C6%B0%E1%BB%9Bng-trend)
-7. [Nhận diện nến đảo chiều](https://www.google.com/search?q=%237-nh%E1%BA%ADn-di%E1%BB%87n-n%E1%BA%BFn-%C4%91%E1%BA%A3o-chi%E1%BB%81u)
-8. [Logic tạo tín hiệu BUY](https://www.google.com/search?q=%238-logic-t%E1%BA%A1o-t%C3%ADn-hi%E1%BB%87u-buy)
-9. [Tính Entry/SL/TP](https://www.google.com/search?q=%239-t%C3%ADnh-entrystltp)
-10. [Backtest Engine](https://www.google.com/search?q=%2311-backtest-engine)
+1. [Tổng quan hệ thống](https://github.com/minhkhang1008/BotTrade/blob/master/INFO.md#1-t%E1%BB%95ng-quan-h%E1%BB%87-th%E1%BB%91ng)
+2. [Kết nối DNSE Market Data](https://github.com/minhkhang1008/BotTrade/blob/master/INFO.md#2-k%E1%BA%BFt-n%E1%BB%91i-dnse-market-data)
+3. [Cấu trúc dữ liệu Bar (Nến)](https://github.com/minhkhang1008/BotTrade/blob/master/INFO.md#3-c%E1%BA%A5u-tr%C3%BAc-d%E1%BB%AF-li%E1%BB%87u-bar-n%E1%BA%BFn)
+4. [Chỉ báo kỹ thuật (Indicators)](https://github.com/minhkhang1008/BotTrade/blob/master/INFO.md#4-ch%E1%BB%89-b%C3%A1o-k%E1%BB%B9-thu%E1%BA%ADt-indicators)
+5. [Phát hiện Pivot Points](https://github.com/minhkhang1008/BotTrade/blob/master/INFO.md#5-ph%C3%A1t-hi%E1%BB%87n-pivot-points)
+6. [Phân tích xu hướng (Trend)](https://github.com/minhkhang1008/BotTrade/blob/master/INFO.md#6-ph%C3%A2n-t%C3%ADch-xu-h%C6%B0%E1%BB%9Bng-trend)
+7. [Nhận diện nến đảo chiều](https://github.com/minhkhang1008/BotTrade/blob/master/INFO.md#7-nh%E1%BA%ADn-di%E1%BB%87n-n%E1%BA%BFn-%C4%91%E1%BA%A3o-chi%E1%BB%81u)
+8. [Logic tạo tín hiệu BUY](https://github.com/minhkhang1008/BotTrade/blob/master/INFO.md#8-logic-t%E1%BA%A1o-t%C3%ADn-hi%E1%BB%87u-buy)
+9. [Tính Entry/SL/TP](https://github.com/minhkhang1008/BotTrade/blob/master/INFO.md#9-t%C3%ADnh-entrysltp)
+10. [Backtest Engine](https://github.com/minhkhang1008/BotTrade/blob/master/INFO.md#10-backtest-engine)
 
 ---
 
