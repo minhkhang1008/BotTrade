@@ -25,12 +25,10 @@ pip install -r requirements.txt
 cat > .env <<'ENV'
 DNSE_USERNAME=
 DNSE_PASSWORD=
-DNSE_ACCOUNT_NO=
 WATCHLIST=VNM,FPT,VIC
 TIMEFRAME=1H
 HOST=0.0.0.0
 PORT=8000
-AUTO_TRADE_ENABLED=False
 
 # Telegram Notification (optional - để nhận thông báo khi có signal)
 TELEGRAM_BOT_TOKEN=
@@ -75,7 +73,6 @@ VITE_WS_URL=ws://localhost:8000/ws/v1/stream
 - **Backend:** FastAPI + WebSocket, chạy trong `src/api/server.py`, entry point ở `run.py`.
 - **Market data (real-time):** MQTT over WSS tới DNSE (adapter ở `src/adapters/dnse_adapter.py`).
 - **Market data (lịch sử):** VNDirect Chart API (`https://dchart-api.vndirect.com.vn/dchart/history`).
-- **Trading:** DNSE Trading Service (OTP + token 8h) trong `src/adapters/trading_service.py`.
 - **Notification:** Telegram Bot API trong `src/adapters/notification_service.py`.
 - **Signal engine:** `src/core` (indicators, patterns, pivots, trend, signal engine, backtest).
 - **DB:** SQLite qua `aiosqlite` (`src/storage/database.py`).
@@ -89,7 +86,6 @@ VITE_WS_URL=ws://localhost:8000/ws/v1/stream
 3. **Lưu DB** (`bars`) → phục vụ API và tải lịch sử.
 4. **SignalEngine** xử lý theo từng mã cổ phiếu.
 5. **Phát tín hiệu** → lưu DB (`signals`) → broadcast qua WebSocket → gửi Telegram notification.
-6. **Tuỳ chọn đặt lệnh** nếu `AUTO_TRADE_ENABLED=True`.
 
 ### Thành phần chính
 - `run.py`: Entry point chính, tránh double-load module khi dùng uvicorn.
@@ -100,7 +96,6 @@ VITE_WS_URL=ws://localhost:8000/ws/v1/stream
   - `DNSEAdapter`: auth → MQTT subscribe → OHLC real-time. Normalize giá (×1000) từ MQTT.
   - `fetch_historical_bars()`: Lấy dữ liệu lịch sử từ VNDirect API (ưu tiên), fallback SSI, TCBS.
   - `MockDNSEAdapter`: tạo chuỗi bar giả lập để demo tín hiệu (deterministic).
-- `src/adapters/trading_service.py`: login, OTP, lấy trading token, place order.
 - `src/adapters/notification_service.py`: Gửi thông báo qua Telegram khi có signal.
 
 ### DB schema

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { BarChart3, TrendingUp, Settings, LineChart, AlertCircle, X } from 'lucide-react'
+import { BarChart3, TrendingUp, Settings, AlertCircle, X } from 'lucide-react'
 import useAppStore from '../../store/appStore'
 import { useMedia } from 'react-use'
 import { useApi } from '../../hooks/useApi'
@@ -65,7 +65,6 @@ export default function Sidebar() {
     { name: 'Dashboard', href: '/', icon: BarChart3 },
     { name: 'Chart', href: `/chart/${firstSymbol}`, icon: TrendingUp },
     { name: 'Signals', href: '/signals', icon: AlertCircle },
-    { name: 'Analytics', href: '/analytics', icon: LineChart },
     { name: 'Settings', href: '/settings', icon: Settings }
   ]
 

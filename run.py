@@ -24,7 +24,6 @@ def main():
     print("="*50)
     print(f"Symbols: {settings.watchlist_symbols}")
     print(f"Timeframe: {settings.timeframe}")
-    print(f"Auto-trade: {'ON ⚠️' if settings.auto_trade_enabled else 'OFF'}")
     print("="*50 + "\n")
     
     # Check for mock mode from command line

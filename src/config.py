@@ -55,10 +55,6 @@ class Settings(BaseSettings):
         alias="DATABASE_URL"
     )
     
-    # Auto-trade Settings
-    auto_trade_enabled: bool = Field(default=False, alias="AUTO_TRADE_ENABLED")
-    dnse_account_no: str = Field(default="", alias="DNSE_ACCOUNT_NO")
-    
     # Backtest Settings
     backtest_initial_capital: float = Field(
         default=100_000_000,
@@ -78,11 +74,6 @@ class Settings(BaseSettings):
     def watchlist_symbols(self) -> List[str]:
         """Return watchlist as a list of symbols."""
         return [s.strip().upper() for s in self.watchlist.split(",") if s.strip()]
-    
-    @property
-    def trading_configured(self) -> bool:
-        """Check if trading is properly configured."""
-        return bool(self.dnse_username and self.dnse_password and self.dnse_account_no)
     
     @property
     def notification_configured(self) -> bool:

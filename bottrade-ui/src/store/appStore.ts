@@ -15,14 +15,6 @@ interface AppState {
   demoMode: boolean
   setDemoMode: (demoMode: boolean) => void
 
-  // Auto Trade State
-  autoTradeEnabled: boolean
-  setAutoTradeEnabled: (enabled: boolean) => void
-
-  // OTP Test State
-  testOtpSignal: Signal | null
-  setTestOtpSignal: (signal: Signal | null) => void
-
   // Signal Check State (for demo visualization)
   signalChecks: Map<string, SignalCheck>
   setSignalCheck: (check: SignalCheck) => void
@@ -61,14 +53,6 @@ export const useAppStore = create<AppState>(set => ({
   // Demo Mode State
   demoMode: false,
   setDemoMode: (demoMode: boolean) => set({ demoMode }),
-
-  // Auto Trade State
-  autoTradeEnabled: false,
-  setAutoTradeEnabled: (enabled: boolean) => set({ autoTradeEnabled: enabled }),
-
-  // OTP Test State
-  testOtpSignal: null,
-  setTestOtpSignal: (signal: Signal | null) => set({ testOtpSignal: signal }),
 
   // Signal Check State (for demo visualization)
   signalChecks: new Map(),

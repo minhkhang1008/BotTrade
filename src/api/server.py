@@ -137,6 +137,8 @@ class AppState:
     """Global application state."""
     dnse_connected: bool = False
     current_settings: Dict[str, Any] = {}
+    # Cache latest signal check data per symbol for new WebSocket clients
+    latest_signal_checks: Dict[str, dict] = {}
 
 
 app_state = AppState()
@@ -425,6 +427,13 @@ async def websocket_endpoint(websocket: WebSocket):
         "timestamp": datetime.now().isoformat()
     })
     
+    # Send cached signal check data so new clients see analysis immediately
+    for symbol, check_data in app_state.latest_signal_checks.items():
+        try:
+            await manager.send_personal(websocket, "signal_check", check_data)
+        except Exception:
+            pass
+    
     try:
         while True:
             # Keep connection alive, handle incoming messages if needed
@@ -453,7 +462,7 @@ async def broadcast_signal_check(symbol: str, bar_data: dict, conditions_passed:
                                   total_conditions: int, passed: list, failed: list,
                                   indicators: dict = None, analysis_details: dict = None):
     """Broadcast signal check progress for UI visualization."""
-    await manager.broadcast("signal_check", {
+    data = {
         "symbol": symbol,
         "bar": bar_data,
         "conditions_passed": conditions_passed,
@@ -463,7 +472,10 @@ async def broadcast_signal_check(symbol: str, bar_data: dict, conditions_passed:
         "indicators": indicators or {},
         "analysis": analysis_details or {},
         "timestamp": datetime.now().isoformat()
-    })
+    }
+    # Cache for new WebSocket clients
+    app_state.latest_signal_checks[symbol] = data
+    await manager.broadcast("signal_check", data)
 
 
 async def broadcast_system_status(status: str, dnse_connected: bool):
@@ -478,198 +490,6 @@ async def broadcast_system_status(status: str, dnse_connected: bool):
 def set_dnse_status(connected: bool):
     """Update DNSE connection status."""
     app_state.dnse_connected = connected
-
-
-# ============ Trading Endpoints ============
-
-# Reference to trading service (set by main.py)
-_trading_service = None
-
-
-def set_trading_service(service):
-    """Set trading service reference."""
-    global _trading_service
-    _trading_service = service
-
-
-class OTPRequest(BaseModel):
-    otp: Optional[str] = None
-    smart_otp: Optional[str] = None
-
-
-class TradingStatusResponse(BaseModel):
-    trading_enabled: bool
-    auto_trade_enabled: bool
-    trading_token_valid: bool
-    account_no: str
-    mock_mode: bool = False
-    authenticated: bool = False
-    active_symbols: List[str] = []
-    signals_today: int = 0
-
-
-class OrderRequest(BaseModel):
-    symbol: str
-    quantity: int
-    price: float
-
-
-@app.get("/api/v1/trading/status", response_model=TradingStatusResponse)
-async def get_trading_status():
-    """Get trading service status."""
-    import os
-    from src.config import settings as app_settings
-    
-    # Check mock mode from environment variable
-    mock_mode = os.environ.get("BOT_TRADE_MOCK_MODE", "false").lower() == "true"
-    
-    # Count signals today
-    signals_today = 0
-    try:
-        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        all_signals = await db.get_signals(limit=100)
-        signals_today = sum(1 for s in all_signals if s.timestamp >= today_start)
-    except Exception:
-        pass  # Database may not be connected yet
-    
-    # Get active symbols from watchlist
-    active_symbols = app_settings.watchlist_symbols
-    
-    if not _trading_service:
-        return TradingStatusResponse(
-            trading_enabled=False,
-            auto_trade_enabled=app_settings.auto_trade_enabled,
-            trading_token_valid=False,
-            account_no="",
-            mock_mode=mock_mode,
-            authenticated=False,
-            active_symbols=active_symbols,
-            signals_today=signals_today
-        )
-    
-    return TradingStatusResponse(
-        trading_enabled=True,
-        auto_trade_enabled=app_settings.auto_trade_enabled,
-        trading_token_valid=_trading_service.tokens.is_trading_token_valid(),
-        account_no=_trading_service.account_no or "",
-        mock_mode=mock_mode,
-        authenticated=_trading_service.tokens.is_trading_token_valid(),
-        active_symbols=active_symbols,
-        signals_today=signals_today
-    )
-
-
-@app.post("/api/v1/trading/request-otp")
-async def request_otp():
-    """Request OTP to be sent via email."""
-    if not _trading_service:
-        raise HTTPException(status_code=503, detail="Trading service not configured")
-    
-    success = await _trading_service.request_email_otp()
-    if success:
-        return {"message": "OTP sent to your email"}
-    else:
-        raise HTTPException(status_code=500, detail="Failed to send OTP")
-
-
-@app.post("/api/v1/trading/authenticate")
-async def authenticate_trading(request: OTPRequest):
-    """Authenticate with OTP to get trading token."""
-    if not _trading_service:
-        raise HTTPException(status_code=503, detail="Trading service not configured")
-    
-    if not request.otp and not request.smart_otp:
-        raise HTTPException(status_code=400, detail="Must provide otp or smart_otp")
-    
-    success = await _trading_service.get_trading_token(
-        otp=request.otp,
-        smart_otp=request.smart_otp
-    )
-    
-    if success:
-        return {"message": "Trading token obtained", "valid_hours": 8}
-    else:
-        raise HTTPException(status_code=401, detail="Invalid OTP")
-
-
-@app.get("/api/v1/trading/balance")
-async def get_balance():
-    """Get account balance."""
-    if not _trading_service:
-        raise HTTPException(status_code=503, detail="Trading service not configured")
-    
-    balance = await _trading_service.get_balance()
-    if balance:
-        return {
-            "account_no": balance.account_no,
-            "cash_balance": balance.cash_balance,
-            "buying_power": balance.buying_power,
-            "withdrawable": balance.withdrawable
-        }
-    else:
-        raise HTTPException(status_code=500, detail="Failed to get balance")
-
-
-@app.get("/api/v1/trading/orders")
-async def get_orders():
-    """Get list of orders."""
-    if not _trading_service:
-        raise HTTPException(status_code=503, detail="Trading service not configured")
-    
-    orders = await _trading_service.get_orders()
-    return [
-        {
-            "id": o.id,
-            "symbol": o.symbol,
-            "side": o.side.value,
-            "price": o.price,
-            "quantity": o.quantity,
-            "filled_quantity": o.filled_quantity,
-            "status": o.status
-        }
-        for o in orders
-    ]
-
-
-@app.post("/api/v1/trading/orders")
-async def place_order(request: OrderRequest):
-    """Place a BUY order manually."""
-    if not _trading_service:
-        raise HTTPException(status_code=503, detail="Trading service not configured")
-    
-    if not _trading_service.tokens.is_trading_token_valid():
-        raise HTTPException(status_code=401, detail="Trading token not valid. Please authenticate with OTP first.")
-    
-    from ..adapters.trading_service import OrderSide, OrderType
-    
-    order = await _trading_service.place_order(
-        symbol=request.symbol,
-        side=OrderSide.BUY,
-        quantity=request.quantity,
-        price=request.price,
-        order_type=OrderType.LO
-    )
-    
-    if order:
-        return {"order_id": order.id, "status": order.status}
-    else:
-        raise HTTPException(status_code=500, detail="Failed to place order")
-
-
-@app.delete("/api/v1/trading/orders/{order_id}")
-async def cancel_order(order_id: str):
-    """Cancel an order."""
-    if not _trading_service:
-        raise HTTPException(status_code=503, detail="Trading service not configured")
-    
-    if not _trading_service.tokens.is_trading_token_valid():
-        raise HTTPException(status_code=401, detail="Trading token not valid")
-    
-    success = await _trading_service.cancel_order(order_id)
-    if success:
-        return {"message": "Order cancelled"}
-    else:
-        raise HTTPException(status_code=500, detail="Failed to cancel order")
 
 
 # ============ Demo Mode Endpoint ============

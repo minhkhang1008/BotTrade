@@ -1,27 +1,8 @@
 import React, { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { useApi } from '../hooks/useApi'
 import useAppStore from '../store/appStore'
 import { Card } from '../components/Common/Card'
-import { AlertCircle, Check, Plus, X, Play, Zap } from 'lucide-react'
-import type { Signal } from '../types/api'
-
-// Signal used when clicking Authenticate button (authentication only, no order)
-const AUTH_SIGNAL: Signal = {
-  id: 0,
-  symbol: 'AUTH',
-  signal_type: 'BUY',
-  timestamp: new Date().toISOString(),
-  entry: 0,
-  stop_loss: 0,
-  take_profit: 0,
-  quantity: 0,
-  status: 'PENDING',
-  reason: 'Manual Authentication',
-  risk: 0,
-  reward: 0,
-  risk_reward_ratio: 0
-}
+import { AlertCircle, Check, Plus, X, Play } from 'lucide-react'
 
 interface SettingsData {
   watchlist: string[]
@@ -31,10 +12,6 @@ interface SettingsData {
   macd_slow: number
   macd_signal: number
   atr_period: number
-  zone_width_atr_multiplier: number
-  sl_buffer_atr_multiplier: number
-  risk_reward_ratio: number
-  default_quantity: number
 }
 
 const DEFAULT_SETTINGS: SettingsData = {
@@ -45,14 +22,9 @@ const DEFAULT_SETTINGS: SettingsData = {
   macd_slow: 26,
   macd_signal: 9,
   atr_period: 14,
-  zone_width_atr_multiplier: 0.5,
-  sl_buffer_atr_multiplier: 0.1,
-  risk_reward_ratio: 2.0,
-  default_quantity: 100
 }
 
 export default function SettingsPage() {
-  const navigate = useNavigate()
   const [settings, setSettings] = useState<SettingsData | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -63,20 +35,10 @@ export default function SettingsPage() {
   const [showAddSymbol, setShowAddSymbol] = useState(false)
   const [demoLoading, setDemoLoading] = useState(false)
   const [demoMessage, setDemoMessage] = useState<string | null>(null)
-  const [tradingStatus, setTradingStatus] = useState<{
-    trading_enabled: boolean
-    auto_trade_enabled: boolean
-    trading_token_valid: boolean
-    account_no: string
-    mock_mode: boolean
-    authenticated: boolean
-    active_symbols: string[]
-    signals_today: number
-  } | null>(null)
   const { get, put, post } = useApi()
   
   // Global state
-  const { demoMode, setDemoMode, autoTradeEnabled, setAutoTradeEnabled } = useAppStore()
+  const { demoMode, setDemoMode } = useAppStore()
 
   useEffect(() => {
     const fetchSettings = async () => {
@@ -94,19 +56,7 @@ export default function SettingsPage() {
       }
     }
 
-    const fetchTradingStatus = async () => {
-      try {
-        const response = await get('/api/v1/trading/status')
-        setTradingStatus(response.data)
-        // Sync auto-trade state from server
-        setAutoTradeEnabled(response.data.auto_trade_enabled)
-      } catch (error) {
-        console.error('Failed to fetch trading status:', error)
-      }
-    }
-
     fetchSettings()
-    fetchTradingStatus()
   }, [])
 
   const handleChange = (field: keyof SettingsData, value: any) => {
@@ -275,58 +225,6 @@ export default function SettingsPage() {
         </div>
       </Card>
 
-      {/* Trading Settings */}
-      <Card title="💰 Trading Settings">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <label className="text-sm text-gray-400 block mb-2">Default Quantity (per trade)</label>
-            <input
-              type="number"
-              min="1"
-              value={formValues.default_quantity}
-              onChange={e => handleChange('default_quantity', parseInt(e.target.value))}
-              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white"
-            />
-          </div>
-
-          <div>
-            <label className="text-sm text-gray-400 block mb-2">Risk/Reward Ratio</label>
-            <input
-              type="number"
-              min="0.5"
-              step="0.1"
-              value={formValues.risk_reward_ratio}
-              onChange={e => handleChange('risk_reward_ratio', parseFloat(e.target.value))}
-              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white"
-            />
-          </div>
-
-          <div>
-            <label className="text-sm text-gray-400 block mb-2">Zone Width (ATR multiplier)</label>
-            <input
-              type="number"
-              min="0.1"
-              step="0.05"
-              value={formValues.zone_width_atr_multiplier}
-              onChange={e => handleChange('zone_width_atr_multiplier', parseFloat(e.target.value))}
-              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white"
-            />
-          </div>
-
-          <div>
-            <label className="text-sm text-gray-400 block mb-2">Stop Loss Buffer (ATR multiplier)</label>
-            <input
-              type="number"
-              min="0.01"
-              step="0.01"
-              value={formValues.sl_buffer_atr_multiplier}
-              onChange={e => handleChange('sl_buffer_atr_multiplier', parseFloat(e.target.value))}
-              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white"
-            />
-          </div>
-        </div>
-      </Card>
-
       {/* Watchlist */}
       <Card title="👁️ Watchlist">
         <div>
@@ -487,113 +385,6 @@ export default function SettingsPage() {
               </button>
             </div>
           )}
-        </div>
-      </Card>
-
-      {/* Auto-Trade */}
-      <Card title="⚡ Auto-Trade">
-        <div className="space-y-4">
-          <p className="text-gray-400 text-sm">
-            Khi bật Auto-Trade, bot sẽ tự động đặt lệnh mua khi có signal phù hợp.
-            {demoMode && (
-              <span className="text-purple-400 ml-1">
-                (Demo mode: chỉ giả lập, không đặt lệnh thật)
-              </span>
-            )}
-          </p>
-          
-          {/* Auto-Trade Toggle */}
-          <div className="flex items-center justify-between p-4 bg-gray-800 rounded-lg border border-gray-700">
-            <div className="flex items-center gap-3">
-              <Zap className={`w-6 h-6 ${autoTradeEnabled ? 'text-yellow-400' : 'text-gray-500'}`} />
-              <div>
-                <div className="text-white font-medium">Auto-Trade</div>
-                <div className="text-gray-400 text-sm">
-                  {autoTradeEnabled 
-                    ? (demoMode ? '🎭 Giả lập đặt lệnh (Demo)' : '🔥 Đặt lệnh thật')
-                    : 'Chỉ thông báo signal, không đặt lệnh'}
-                </div>
-              </div>
-            </div>
-            <button
-              onClick={() => {
-                setAutoTradeEnabled(!autoTradeEnabled)
-                // TODO: Call API to sync with backend
-              }}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                autoTradeEnabled ? 'bg-yellow-500' : 'bg-gray-600'
-              }`}
-            >
-              <span
-                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                  autoTradeEnabled ? 'translate-x-6' : 'translate-x-1'
-                }`}
-              />
-            </button>
-          </div>
-
-          {/* Trading Status */}
-          {tradingStatus && (
-            <div className="p-4 bg-gray-800 rounded-lg border border-gray-700">
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <span className="text-gray-400">Trạng thái:</span>
-                  <span className={`ml-2 font-medium ${tradingStatus.mock_mode ? 'text-purple-400' : 'text-green-400'}`}>
-                    {tradingStatus.mock_mode ? '🎭 Mock Mode' : '🔴 Live Mode'}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-gray-400">Xác thực:</span>
-                  <span className={`ml-2 font-medium ${tradingStatus.authenticated ? 'text-green-400' : 'text-red-400'}`}>
-                    {tradingStatus.authenticated ? '✅ Đã đăng nhập' : '❌ Chưa đăng nhập'}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-gray-400">Symbols:</span>
-                  <span className="ml-2 text-white">{tradingStatus.active_symbols?.length || 0} mã</span>
-                </div>
-                <div>
-                  <span className="text-gray-400">Signals hôm nay:</span>
-                  <span className="ml-2 text-white">{tradingStatus.signals_today || 0}</span>
-                </div>
-              </div>
-            </div>
-          )}
-          
-          {/* Warning for Live Mode */}
-          {autoTradeEnabled && !demoMode && (
-            <div className="p-3 bg-red-900/30 border border-red-700 rounded text-sm text-red-400">
-              ⚠️ <strong>Cảnh báo:</strong> Auto-Trade đang BẬT ở chế độ Live. 
-              Bot sẽ đặt lệnh THẬT khi có signal. Đảm bảo bạn đã cấu hình đúng risk management.
-            </div>
-          )}
-          
-          {/* Authenticate Button */}
-          <button
-            onClick={() => {
-              // Set auth signal to open OTP dialog for authentication
-              useAppStore.getState().setTestOtpSignal(AUTH_SIGNAL)
-              navigate('/')
-            }}
-            disabled={tradingStatus?.trading_token_valid}
-            className={`w-full px-4 py-3 rounded-lg transition flex items-center justify-center gap-2 ${
-              tradingStatus?.trading_token_valid
-                ? 'bg-green-700 text-green-200 cursor-not-allowed'
-                : 'bg-blue-600 hover:bg-blue-700 text-white'
-            }`}
-          >
-            {tradingStatus?.trading_token_valid ? (
-              <>
-                ✅ Đã xác thực
-                <span className="text-xs text-green-300">(Hiệu lực 8 tiếng)</span>
-              </>
-            ) : (
-              <>
-                🔐 Authenticate
-                <span className="text-xs text-blue-200">(Xác thực OTP cho Auto-Trade)</span>
-              </>
-            )}
-          </button>
         </div>
       </Card>
 

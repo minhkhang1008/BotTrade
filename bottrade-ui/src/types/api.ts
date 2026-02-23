@@ -47,17 +47,6 @@ export interface Settings {
   default_quantity: number
 }
 
-export interface TradingStatus {
-  trading_enabled: boolean
-  auto_trade_enabled: boolean
-  trading_token_valid: boolean
-  account_no: string
-  mock_mode: boolean
-  authenticated: boolean
-  active_symbols: string[]
-  signals_today: number
-}
-
 // Pivot point for analysis
 export interface PivotPoint {
   price: number

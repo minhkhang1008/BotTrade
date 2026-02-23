@@ -1,6 +1,6 @@
 """
 Bot Trade - Main Entry Point
-Orchestrates all components: DNSE adapter, signal engine, trading, and API server
+Orchestrates all components: DNSE adapter, signal engine, notifications, and API server
 """
 import asyncio
 import logging
@@ -13,7 +13,6 @@ import uvicorn
 from .config import settings
 from .storage.database import db
 from .adapters.dnse_adapter import DNSEAdapter, DNSEConfig, MockDNSEAdapter
-from .adapters.trading_service import TradingService, OrderSide, OrderType
 from .adapters.notification_service import init_notification_service, get_notification_service
 from .core.signal_engine import SignalEngine
 from .core.models import Bar, Signal, SignalType, SignalStatus
@@ -24,7 +23,6 @@ from .api.server import (
     broadcast_signal_check,
     broadcast_system_status,
     set_dnse_status,
-    set_trading_service,
     set_watchlist_update_callback,
     set_demo_mode_callback,
     set_force_demo_signal_callback,
@@ -53,7 +51,6 @@ class BotTradeApp:
     Connects all components:
     - DNSE Adapter: Receives market data
     - Signal Engine: Generates trading signals
-    - Trading Service: Places orders (optional)
     - API Server: Provides REST/WebSocket API
     - Database: Persists bars and signals
     """
@@ -62,7 +59,6 @@ class BotTradeApp:
         self.use_mock = use_mock
         self.signal_engines: dict[str, SignalEngine] = {}
         self.dnse_adapter = None
-        self.trading_service: Optional[TradingService] = None
         self._main_loop: Optional[asyncio.AbstractEventLoop] = None
         self._running = False
         self._current_symbols: list[str] = []
@@ -120,78 +116,7 @@ class BotTradeApp:
             
             # Broadcast signal check result for UI visualization
             if result:
-                passed_count = len(result.reasons) if result.reasons else 0
-                failed_count = len(result.failed_conditions) if result.failed_conditions else 0
-                total_conditions = 4  # uptrend, support zone, pattern, confirmation
-                
-                # Get indicator values for display
-                indicators = {}
-                analysis_details = {}
-                
-                if hasattr(engine, 'bars') and len(engine.bars) > 0:
-                    from .core.indicators import get_all_indicators
-                    ind = get_all_indicators(
-                        engine.bars,
-                        engine.rsi_period,
-                        engine.macd_fast,
-                        engine.macd_slow,
-                        engine.macd_signal,
-                        engine.atr_period
-                    )
-                    indicators = {
-                        "rsi": round(ind.rsi, 2) if ind.rsi else None,
-                        "macd": round(ind.macd_line, 4) if ind.macd_line else None,
-                        "macd_signal": round(ind.macd_signal, 4) if ind.macd_signal else None,
-                        "atr": round(ind.atr, 2) if ind.atr else None,
-                    }
-                    
-                    # Get detailed analysis for UI
-                    pivot_lows = [{"price": p.price, "index": p.bar_index} for p in engine.pivot_detector.pivot_lows[-5:]]
-                    pivot_highs = [{"price": p.price, "index": p.bar_index} for p in engine.pivot_detector.pivot_highs[-5:]]
-                    
-                    # Get trend analysis with higher lows/highs counts
-                    trend_result = engine.trend_analyzer.analyze(
-                        engine.pivot_detector.pivot_lows,
-                        engine.pivot_detector.pivot_highs
-                    )
-                    
-                    # Get support zone info
-                    support_zone = None
-                    if ind.atr and engine.pivot_detector.pivot_lows:
-                        last_pivot = engine.pivot_detector.pivot_lows[-1]
-                        zone_width = engine.zone_width_atr_mult * ind.atr
-                        support_zone = {
-                            "pivot_price": last_pivot.price,
-                            "zone_low": last_pivot.price - zone_width,
-                            "zone_high": last_pivot.price + zone_width,
-                        }
-                    
-                    analysis_details = {
-                        "pivot_lows": pivot_lows,
-                        "pivot_highs": pivot_highs,
-                        "pivot_lows_count": len(engine.pivot_detector.pivot_lows),
-                        "pivot_highs_count": len(engine.pivot_detector.pivot_highs),
-                        # Trend analysis results (consecutive higher pairs)
-                        "higher_lows_count": trend_result.higher_lows_count,
-                        "higher_highs_count": trend_result.higher_highs_count,
-                        "is_uptrend": trend_result.is_uptrend,
-                        "trend_reason": trend_result.reason,
-                        "support_zone": support_zone,
-                        "bar_low": bar.low,
-                        "bar_high": bar.high,
-                        "total_bars": len(engine.bars),
-                    }
-                
-                await broadcast_signal_check(
-                    symbol=bar.symbol,
-                    bar_data=bar.to_dict(),
-                    conditions_passed=passed_count,
-                    total_conditions=total_conditions,
-                    passed=result.reasons or [],
-                    failed=result.failed_conditions or [],
-                    indicators=indicators,
-                    analysis_details=analysis_details
-                )
+                await self._broadcast_signal_check(bar.symbol, engine, bar, result)
             
             if result and result.should_signal and result.signal:
                 signal = result.signal
@@ -207,39 +132,114 @@ class BotTradeApp:
                 notifier = get_notification_service()
                 if notifier and notifier.is_enabled:
                     await notifier.send_signal_notification(signal)
-                
-                # Auto-trade: place order
-                if settings.auto_trade_enabled and self.trading_service:
-                    await self._execute_trade(signal)
         
         except Exception as e:
             logger.error(f"Error processing bar: {e}")
     
-    async def _execute_trade(self, signal: Signal):
-        """Execute trade based on signal."""
-        if not self.trading_service:
-            return
+    async def _broadcast_signal_check(self, symbol: str, engine, bar: Bar, result=None):
+        """
+        Broadcast signal check result for UI visualization.
+        Can be called with a SignalCheckResult (from add_bar) or without one
+        (for initial state broadcast from historical data).
+        """
+        from .core.indicators import get_all_indicators
         
-        if not self.trading_service.tokens.is_trading_token_valid():
-            logger.warning("⚠️ Trading token expired. Need OTP to continue.")
-            return
+        if result:
+            passed_count = len(result.reasons) if result.reasons else 0
+            passed_list = result.reasons or []
+            failed_list = result.failed_conditions or []
+        else:
+            # Run check_signal on the engine's current state (no new bar added)
+            check_result = engine.check_signal()
+            passed_count = len(check_result.reasons) if check_result.reasons else 0
+            passed_list = check_result.reasons or []
+            failed_list = check_result.failed_conditions or []
         
-        try:
-            order = await self.trading_service.place_order(
-                symbol=signal.symbol,
-                side=OrderSide.BUY,
-                quantity=signal.quantity,
-                price=signal.entry,
-                order_type=OrderType.LO
+        total_conditions = 4  # uptrend, support zone, pattern, confirmation
+        
+        # Get indicator values for display
+        indicators = {}
+        analysis_details = {}
+        
+        if hasattr(engine, 'bars') and len(engine.bars) > 0:
+            ind = get_all_indicators(
+                engine.bars,
+                engine.rsi_period,
+                engine.macd_fast,
+                engine.macd_slow,
+                engine.macd_signal,
+                engine.atr_period
+            )
+            indicators = {
+                "rsi": round(ind.rsi, 2) if ind.rsi else None,
+                "macd": round(ind.macd_line, 4) if ind.macd_line else None,
+                "macd_signal": round(ind.macd_signal, 4) if ind.macd_signal else None,
+                "atr": round(ind.atr, 2) if ind.atr else None,
+            }
+            
+            # Get detailed analysis for UI
+            pivot_lows = [{"price": p.price, "index": p.bar_index} for p in engine.pivot_detector.pivot_lows[-5:]]
+            pivot_highs = [{"price": p.price, "index": p.bar_index} for p in engine.pivot_detector.pivot_highs[-5:]]
+            
+            # Get trend analysis with higher lows/highs counts
+            trend_result = engine.trend_analyzer.analyze(
+                engine.pivot_detector.pivot_lows,
+                engine.pivot_detector.pivot_highs
             )
             
-            if order:
-                logger.info(f"✅ Order placed: {order.id}")
-            else:
-                logger.error("❌ Failed to place order")
+            # Get support zone info
+            support_zone = None
+            if ind.atr and engine.pivot_detector.pivot_lows:
+                last_pivot = engine.pivot_detector.pivot_lows[-1]
+                zone_width = engine.zone_width_atr_mult * ind.atr
+                support_zone = {
+                    "pivot_price": last_pivot.price,
+                    "zone_low": last_pivot.price - zone_width,
+                    "zone_high": last_pivot.price + zone_width,
+                }
+            
+            analysis_details = {
+                "pivot_lows": pivot_lows,
+                "pivot_highs": pivot_highs,
+                "pivot_lows_count": len(engine.pivot_detector.pivot_lows),
+                "pivot_highs_count": len(engine.pivot_detector.pivot_highs),
+                # Trend analysis results (consecutive higher pairs)
+                "higher_lows_count": trend_result.higher_lows_count,
+                "higher_highs_count": trend_result.higher_highs_count,
+                "is_uptrend": trend_result.is_uptrend,
+                "trend_reason": trend_result.reason,
+                "support_zone": support_zone,
+                "bar_low": bar.low,
+                "bar_high": bar.high,
+                "total_bars": len(engine.bars),
+            }
         
-        except Exception as e:
-            logger.error(f"Trade error: {e}")
+        await broadcast_signal_check(
+            symbol=symbol,
+            bar_data=bar.to_dict(),
+            conditions_passed=passed_count,
+            total_conditions=total_conditions,
+            passed=passed_list,
+            failed=failed_list,
+            indicators=indicators,
+            analysis_details=analysis_details
+        )
+    
+    async def _broadcast_initial_signal_checks(self):
+        """
+        Broadcast initial signal check state for all symbols using their latest historical bar.
+        This ensures the UI shows analysis data immediately on startup,
+        even before new live bars arrive from MQTT.
+        """
+        for symbol in self._current_symbols:
+            engine = self.signal_engines.get(symbol)
+            if engine and hasattr(engine, 'bars') and len(engine.bars) >= 2:
+                last_bar = engine.bars[-1]
+                try:
+                    await self._broadcast_signal_check(symbol, engine, last_bar)
+                    logger.info(f"📊 Broadcast initial signal check for {symbol}")
+                except Exception as e:
+                    logger.error(f"Failed to broadcast initial signal check for {symbol}: {e}")
     
     def _on_connected(self):
         """Handle DNSE connected (called from MQTT thread)."""
@@ -420,19 +420,6 @@ class BotTradeApp:
         else:
             app_state.current_settings["default_quantity"] = settings.default_quantity
         
-        # Initialize Trading Service (if configured)
-        if settings.trading_configured:
-            self.trading_service = TradingService(
-                username=settings.dnse_username,
-                password=settings.dnse_password,
-                account_no=settings.dnse_account_no
-            )
-            if await self.trading_service.initialize():
-                logger.info(f"Trading service ready | Account: {settings.dnse_account_no}")
-                set_trading_service(self.trading_service)  # Register with API
-                if settings.auto_trade_enabled:
-                    logger.warning("⚠️ AUTO-TRADE ENABLED - Bot will place real orders!")
-        
         # Initialize signal engines for watchlist (use loaded symbols from DB or .env)
         for symbol in self._current_symbols:
             self.signal_engines[symbol] = self._create_signal_engine(symbol)
@@ -497,13 +484,14 @@ class BotTradeApp:
                 logger.warning("⚠️ DNSE credentials not found - API-only mode (set DNSE_USERNAME and DNSE_PASSWORD in .env)")
         
         logger.info(f"🚀 Bot Trade started | Symbols: {self._current_symbols}")
+        
+        # Broadcast initial signal check state for all symbols
+        # so the UI shows analysis data immediately (not just "Waiting for market data...")
+        await self._broadcast_initial_signal_checks()
     
     async def stop(self):
         """Stop the bot application."""
         self._running = False
-        
-        if self.trading_service:
-            await self.trading_service.close()
         
         if self.dnse_adapter:
             if isinstance(self.dnse_adapter, MockDNSEAdapter):
@@ -573,7 +561,6 @@ def main():
     print("="*50)
     print(f"Symbols: {settings.watchlist_symbols}")
     print(f"Timeframe: {settings.timeframe}")
-    print(f"Auto-trade: {'ON ⚠️' if settings.auto_trade_enabled else 'OFF'}")
     print("="*50 + "\n")
     
     # Check for mock mode from command line
