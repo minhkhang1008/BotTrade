@@ -15,8 +15,7 @@ Tài liệu kỹ thuật chi tiết về cách hoạt động của Bot Trade.
 7. [Nhận diện nến đảo chiều](https://www.google.com/search?q=%237-nh%E1%BA%ADn-di%E1%BB%87n-n%E1%BA%BFn-%C4%91%E1%BA%A3o-chi%E1%BB%81u)
 8. [Logic tạo tín hiệu BUY](https://www.google.com/search?q=%238-logic-t%E1%BA%A1o-t%C3%ADn-hi%E1%BB%87u-buy)
 9. [Tính Entry/SL/TP](https://www.google.com/search?q=%239-t%C3%ADnh-entrystltp)
-10. [Trading API (DNSE)](https://www.google.com/search?q=%2310-trading-api-dnse)
-11. [Backtest Engine](https://www.google.com/search?q=%2311-backtest-engine)
+10. [Backtest Engine](https://www.google.com/search?q=%2311-backtest-engine)
 
 ---
 
@@ -539,7 +538,7 @@ def should_move_to_breakeven(self, current_high: float) -> bool:
 
 ---
 
-## 11. Backtest Engine
+## 10. Backtest Engine
 
 **File:** `src/core/backtest.py`
 
