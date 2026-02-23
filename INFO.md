@@ -6,17 +6,17 @@ Tài liệu kỹ thuật chi tiết về cách hoạt động của Bot Trade.
 
 ## Mục lục
 
-1. [Tổng quan hệ thống](#1-tổng-quan-hệ-thống)
-2. [Kết nối DNSE Market Data](#2-kết-nối-dnse-market-data)
-3. [Cấu trúc dữ liệu Bar (Nến)](#3-cấu-trúc-dữ-liệu-bar-nến)
-4. [Chỉ báo kỹ thuật (Indicators)](#4-chỉ-báo-kỹ-thuật-indicators)
-5. [Phát hiện Pivot Points](#5-phát-hiện-pivot-points)
-6. [Phân tích xu hướng (Trend)](#6-phân-tích-xu-hướng-trend)
-7. [Nhận diện nến đảo chiều](#7-nhận-diện-nến-đảo-chiều)
-8. [Logic tạo tín hiệu BUY](#8-logic-tạo-tín-hiệu-buy)
-9. [Tính Entry/SL/TP](#9-tính-entrystltp)
-10. [Trading API (DNSE)](#10-trading-api-dnse)
-11. [Backtest Engine](#11-backtest-engine)
+1. [Tổng quan hệ thống](https://www.google.com/search?q=%231-t%E1%BB%95ng-quan-h%E1%BB%87-th%E1%BB%91ng)
+2. [Kết nối DNSE Market Data](https://www.google.com/search?q=%232-k%E1%BA%BFt-n%E1%BB%91i-dnse-market-data)
+3. [Cấu trúc dữ liệu Bar (Nến)](https://www.google.com/search?q=%233-c%E1%BA%A5u-tr%C3%BAc-d%E1%BB%AF-li%E1%BB%87u-bar-n%E1%BA%BFn)
+4. [Chỉ báo kỹ thuật (Indicators)](https://www.google.com/search?q=%234-ch%E1%BB%89-b%C3%A1o-k%E1%BB%B9-thu%E1%BA%ADt-indicators)
+5. [Phát hiện Pivot Points](https://www.google.com/search?q=%235-ph%C3%A1t-hi%E1%BB%87n-pivot-points)
+6. [Phân tích xu hướng (Trend)](https://www.google.com/search?q=%236-ph%C3%A2n-t%C3%ADch-xu-h%C6%B0%E1%BB%9Bng-trend)
+7. [Nhận diện nến đảo chiều](https://www.google.com/search?q=%237-nh%E1%BA%ADn-di%E1%BB%87n-n%E1%BA%BFn-%C4%91%E1%BA%A3o-chi%E1%BB%81u)
+8. [Logic tạo tín hiệu BUY](https://www.google.com/search?q=%238-logic-t%E1%BA%A1o-t%C3%ADn-hi%E1%BB%87u-buy)
+9. [Tính Entry/SL/TP](https://www.google.com/search?q=%239-t%C3%ADnh-entrystltp)
+10. [Trading API (DNSE)](https://www.google.com/search?q=%2310-trading-api-dnse)
+11. [Backtest Engine](https://www.google.com/search?q=%2311-backtest-engine)
 
 ---
 
@@ -27,23 +27,19 @@ Tài liệu kỹ thuật chi tiết về cách hoạt động của Bot Trade.
 │  DNSE Market    │────▶│   Bot Trade     │────▶│   WebSocket     │
 │  Data (MQTT)    │     │   Core Engine   │     │   (to UI)       │
 └─────────────────┘     └─────────────────┘     └─────────────────┘
-                               │
-                               ▼
-                        ┌─────────────────┐
-                        │  Trading API    │
-                        │  (đặt lệnh)     │
-                        └─────────────────┘
+
 ```
 
 **Flow chính:**
-1. Nhận dữ liệu nến (OHLC) từ DNSE qua MQTT
-2. Tính toán indicators (RSI, MACD, ATR)
-3. Phát hiện pivot points (đỉnh/đáy)
-4. Phân tích xu hướng
-5. Kiểm tra nến đảo chiều
-6. Tạo tín hiệu nếu đủ điều kiện
-7. Gửi thông báo qua WebSocket
-8. (Optional) Tự động đặt lệnh
+
+1. Đồng bộ dữ liệu lịch sử từ VNDirect/SSI/TCBS API để khởi tạo các chỉ báo.
+2. Nhận dữ liệu nến real-time từ DNSE qua MQTT
+3. Tính toán indicators (RSI, MACD, ATR)
+4. Phát hiện pivot points (đỉnh/đáy)
+5. Phân tích xu hướng
+6. Kiểm tra nến đảo chiều
+7. Tạo tín hiệu nếu đủ điều kiện
+8. Gửi thông báo qua WebSocket và Telegram
 
 ---
 
@@ -54,6 +50,7 @@ Tài liệu kỹ thuật chi tiết về cách hoạt động của Bot Trade.
 **URL:** `wss://datafeed-lts-krx.dnse.com.vn/wss`
 
 **Authentication (theo API doc DNSE):**
+
 ```
 1. Đăng nhập: POST https://api.dnse.com.vn/user-service/api/auth
    -> Lấy JWT token
@@ -66,22 +63,27 @@ Tài liệu kỹ thuật chi tiết về cách hoạt động của Bot Trade.
    - ClientID: dnse-price-json-mqtt-ws-sub-<investorId>-<random_sequence>
    - Username: <investorId>
    - Password: <JWT token>
+
 ```
 
 **Topic format:**
+
 ```
 plaintext/quotes/krx/mdds/v2/ohlc/stock/{timeframe}/{symbol}
+
 ```
 
 Ví dụ: `plaintext/quotes/krx/mdds/v2/ohlc/stock/1H/VNM`
 
 **Timeframe:**
-- `1`: Phút
-- `1H`: Giờ
-- `1D`: Ngày
-- `W`: Tuần
+
+* `1`: Phút
+* `1H`: Giờ
+* `1D`: Ngày
+* `W`: Tuần
 
 **Message format (JSON):**
+
 ```json
 {
   "time": "2024-01-23T10:00:00",
@@ -91,6 +93,7 @@ Ví dụ: `plaintext/quotes/krx/mdds/v2/ohlc/stock/1H/VNM`
   "c": 75500,    // Close
   "v": 150000   // Volume
 }
+
 ```
 
 **Xử lý trong code:** `src/adapters/dnse_adapter.py`
@@ -112,9 +115,11 @@ class Bar:
     low: float       # Giá thấp nhất
     close: float     # Giá đóng cửa
     volume: float    # Khối lượng
+
 ```
 
 **Các thuộc tính tính toán:**
+
 ```python
 @property
 def body_size(self):
@@ -145,6 +150,7 @@ def is_bullish(self):
 def is_bearish(self):
     """Nến giảm: Close < Open"""
     return self.close < self.open
+
 ```
 
 ---
@@ -156,14 +162,17 @@ def is_bearish(self):
 ### RSI (Relative Strength Index)
 
 **Công thức:**
+
 ```
 RSI = 100 - (100 / (1 + RS))
 RS = Average Gain / Average Loss (trong N periods)
+
 ```
 
 **Tham số:** `period = 14` (mặc định)
 
 **Code:**
+
 ```python
 def calculate_rsi(closes: List[float], period: int = 14) -> float:
     if len(closes) < period + 1:
@@ -181,40 +190,47 @@ def calculate_rsi(closes: List[float], period: int = 14) -> float:
     
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
+
 ```
 
 **Ý nghĩa:**
-- RSI > 70: Quá mua (overbought)
-- RSI < 30: Quá bán (oversold)
-- RSI > 50: Momentum tăng (dùng để xác nhận)
+
+* RSI > 70: Quá mua (overbought)
+* RSI < 30: Quá bán (oversold)
+* RSI > 50: Momentum tăng (dùng để xác nhận)
 
 ---
 
 ### MACD (Moving Average Convergence Divergence)
 
 **Công thức:**
+
 ```
 MACD Line = EMA(12) - EMA(26)
 Signal Line = EMA(9) của MACD Line
 Histogram = MACD Line - Signal Line
+
 ```
 
 **Tham số:**
-- `fast_period = 12`
-- `slow_period = 26`
-- `signal_period = 9`
+
+* `fast_period = 12`
+* `slow_period = 26`
+* `signal_period = 9`
 
 **MACD Crossover (tín hiệu xác nhận):**
+
 ```python
 def check_macd_crossover(current: MACDResult, previous: MACDResult) -> bool:
     """
     Bullish crossover: MACD cắt lên Signal Line
-    - Previous: MACD < Signal (histogram < 0)
+    - Previous: MACD <= Signal (histogram <= 0)
     - Current: MACD > Signal (histogram > 0)
     """
     if previous is None or current is None:
         return False
-    return previous.histogram < 0 and current.histogram > 0
+    return previous.histogram <= 0 and current.histogram > 0
+
 ```
 
 ---
@@ -222,6 +238,7 @@ def check_macd_crossover(current: MACDResult, previous: MACDResult) -> bool:
 ### ATR (Average True Range)
 
 **Công thức:**
+
 ```
 True Range = max(
     High - Low,
@@ -229,13 +246,15 @@ True Range = max(
     |Low - Previous Close|
 )
 ATR = SMA của True Range trong N periods
+
 ```
 
 **Tham số:** `period = 14`
 
 **Ý nghĩa:**
-- Đo lường độ biến động của giá
-- Dùng để tính support zone width và SL buffer
+
+* Đo lường độ biến động của giá
+* Dùng để tính support zone width và SL buffer
 
 ---
 
@@ -244,18 +263,23 @@ ATR = SMA của True Range trong N periods
 **File:** `src/core/pivot_detector.py`
 
 ### Pivot Low (Đáy)
+
 ```
 Điều kiện: Bar[i].low < Bar[i-1].low AND Bar[i].low < Bar[i+1].low
+
 ```
 
 Nghĩa là: một bar có giá low thấp hơn cả bar trước và bar sau.
 
 ### Pivot High (Đỉnh)
+
 ```
 Điều kiện: Bar[i].high > Bar[i-1].high AND Bar[i].high > Bar[i+1].high
+
 ```
 
 **Cấu trúc Pivot:**
+
 ```python
 @dataclass
 class Pivot:
@@ -263,6 +287,7 @@ class Pivot:
     bar_index: int
     price: float           # Giá tại pivot
     pivot_type: PivotType  # HIGH hoặc LOW
+
 ```
 
 **Lưu ý:** Pivot được xác nhận SAU 1 bar (cần bar sau để so sánh).
@@ -279,21 +304,29 @@ class Pivot:
 Uptrend = TRUE khi:
   - 4 pivot low liên tiếp tăng dần (Low1 < Low2 < Low3 < Low4) = 3 cặp higher lows
   - VÀ 4 pivot high liên tiếp tăng dần (High1 < High2 < High3 < High4) = 3 cặp higher highs
+
 ```
 
 **Minh họa:**
 ```
-         H4
-        /  \        H3
-       /    \      /  \        H2
-      /      \    /    \      /  \
-     /        \  /      \    /    \
-    /          L3        \  /      \
-   /                      L2        \
-  H1                                 L1
+                                               H4
+                                              /
+                                   H3        /  
+                                  /  \      /
+                      H2         /    \    /
+         H1          /  \       /      \  /
+        /  \        /    \     /        L4
+       /    \      /      \   /  
+      /      \    /        L3   
+     /        \  /            
+    /          L2              
+   /                             
+  L1                         
+
 ```
 
 **Code:**
+
 ```python
 def _count_higher_pairs(self, pivots: List[Pivot]) -> int:
     """Đếm số cặp pivot tăng dần từ cuối"""
@@ -311,6 +344,7 @@ def analyze(self, pivot_lows, pivot_highs) -> TrendAnalysisResult:
     
     is_uptrend = (higher_lows >= 3) and (higher_highs >= 3)
     return TrendAnalysisResult(is_uptrend, higher_lows, higher_highs)
+
 ```
 
 ---
@@ -323,21 +357,23 @@ def analyze(self, pivot_lows, pivot_highs) -> TrendAnalysisResult:
 
 ```
 Điều kiện:
-1. Thân nến nhỏ (< 30% tổng biên độ)
-2. Bóng dưới dài (>= 2x thân nến)
+1. Thân nến nhỏ (< 35% tổng biên độ)
+2. Bóng dưới dài (>= 1.8x thân nến)
 3. Bóng trên nhỏ (< thân nến)
+
 ```
 
 ```python
 def is_hammer(bar: Bar) -> bool:
     body = bar.body_size
-    if body / bar.total_range > 0.3:  # Thân > 30%
+    if body / bar.total_range > 0.35:  # Thân > 35%
         return False
-    if bar.lower_shadow / body < 2.0:  # Bóng dưới < 2x thân
+    if bar.lower_shadow / body < 1.8:  # Bóng dưới < 1.8x thân
         return False
     if bar.upper_shadow > body:  # Bóng trên > thân
         return False
     return True
+
 ```
 
 **Ý nghĩa:** Xuất hiện ở đáy, báo hiệu đảo chiều tăng.
@@ -351,6 +387,7 @@ def is_hammer(bar: Bar) -> bool:
 1. Bar trước đó là nến giảm (bearish)
 2. Bar hiện tại là nến tăng (bullish)
 3. Thân nến hiện tại "nuốt" hoàn toàn thân nến trước
+
 ```
 
 ```python
@@ -367,6 +404,7 @@ def is_bullish_engulfing(current: Bar, previous: Bar) -> bool:
     prev_high = max(previous.open, previous.close)
     
     return curr_low < prev_low and curr_high > prev_high
+
 ```
 
 ---
@@ -382,7 +420,8 @@ SIGNAL BUY khi:
   ✅ Điều kiện 1: UPTREND (3 higher highs + 3 higher lows)
   ✅ Điều kiện 2: Giá chạm SUPPORT ZONE
   ✅ Điều kiện 3: Có nến ĐẢO CHIỀU (Hammer hoặc Bullish Engulfing)
-  ✅ Điều kiện 4: XÁC NHẬN (MACD crossover HOẶC RSI > 50)
+  ✅ Điều kiện 4: XÁC NHẬN (Ưu tiên MACD bullish crossover, phương án dự phòng HOẶC RSI > 50)
+
 ```
 
 ### Support Zone
@@ -397,9 +436,11 @@ def _get_support_zone(self, atr: float) -> SupportZone:
         zone_low=last_pivot_low.price - width,
         zone_high=last_pivot_low.price + width
     )
+
 ```
 
 **Minh họa:**
+
 ```
 Price
   │
@@ -412,6 +453,7 @@ Price
   └──────────────────────────────▶ Time
               ▲
          Pivot Low
+
 ```
 
 ### Kiểm tra giá trong zone
@@ -420,6 +462,7 @@ Price
 def contains_price(self, low: float, high: float) -> bool:
     """Kiểm tra giá có chạm zone không"""
     return not (high < self.zone_low or low > self.zone_high)
+
 ```
 
 ---
@@ -427,34 +470,44 @@ def contains_price(self, low: float, high: float) -> bool:
 ## 9. Tính Entry/SL/TP
 
 ### Entry
+
 ```
 Entry = Giá đóng cửa của nến tín hiệu
+
 ```
 
 ### Stop Loss
+
 ```
 SL = Previous Pivot Low - (0.05 * ATR)
+
 ```
 
 Đặt SL dưới pivot low trước đó một khoảng buffer.
 
 ### Take Profit
+
 ```
 Risk = Entry - SL
 TP = Entry + (Risk * Risk_Reward_Ratio)
+
 ```
 
 Với `Risk_Reward_Ratio = 2.0`:
+
 ```
 TP = Entry + 2 * (Entry - SL)
+
 ```
 
 **Ví dụ:**
+
 ```
 Entry = 75,000
 SL = 73,500
 Risk = 75,000 - 73,500 = 1,500
 TP = 75,000 + (2 * 1,500) = 78,000
+
 ```
 
 ### Trailing Stop (Move to Breakeven)
@@ -467,31 +520,15 @@ def should_move_to_breakeven(self, current_high: float) -> bool:
     
     one_r_target = self.entry + self.risk
     return current_high >= one_r_target
+
 ```
 
 ---
 
-## 10. Trading API (DNSE)
-
-**File:** `src/adapters/trading_service.py`
-
-### Authentication Flow
-
-```
-1. Login (username, password)
-   └─▶ JWT Token (valid 8 hours)
-
-2. Request OTP
-   └─▶ OTP gửi qua email (valid 2 minutes)
-
-3. Exchange OTP
-   └─▶ Trading Token (valid 8 hours)
-```
-
 ### API Endpoints
 
 | Action | Method | URL |
-|--------|--------|-----|
+| --- | --- | --- |
 | Login | POST | `/auth-service/login` |
 | Get OTP | GET | `/auth-service/api/email-otp` |
 | Get Trading Token | POST | `/order-service/trading-token` |
@@ -499,20 +536,6 @@ def should_move_to_breakeven(self, current_high: float) -> bool:
 | Get Balance | GET | `/order-service/account-balances/{id}` |
 | Place Order | POST | `/order-service/v2/orders` |
 | Cancel Order | DELETE | `/order-service/v2/orders/{id}` |
-
-### Place Order Request
-
-```json
-{
-  "symbol": "VNM",
-  "side": "NB",           // NB = Buy, NS = Sell
-  "orderType": "LO",      // LO = Limit Order
-  "price": 75000,
-  "quantity": 100,
-  "accountNo": "1234567890",
-  "loanPackageId": 12345
-}
-```
 
 ---
 
@@ -531,6 +554,7 @@ def should_move_to_breakeven(self, current_high: float) -> bool:
    - Kiểm tra TP hit → đóng lời
    - Kiểm tra breakeven → move SL
 5. Tính metrics cuối cùng
+
 ```
 
 ### CSV Format
@@ -538,6 +562,7 @@ def should_move_to_breakeven(self, current_high: float) -> bool:
 ```csv
 time,open,high,low,close,volume
 2024-01-02 09:00:00,75000,76000,74500,75500,150000
+
 ```
 
 ### Metrics tính toán
@@ -559,6 +584,7 @@ class BacktestResult:
     profit_factor: float      # Tổng lời / Tổng lỗ
     average_win: float        # Trung bình lời
     average_loss: float       # Trung bình lỗ
+
 ```
 
 ---
@@ -566,7 +592,7 @@ class BacktestResult:
 ## Tóm tắt tham số cấu hình
 
 | Tham số | Mặc định | Mô tả |
-|---------|----------|-------|
+| --- | --- | --- |
 | RSI_PERIOD | 14 | Số periods tính RSI |
 | MACD_FAST | 12 | EMA nhanh |
 | MACD_SLOW | 26 | EMA chậm |
@@ -627,10 +653,5 @@ class BacktestResult:
         │  Broadcast WS     │
         │  Auto-trade?      │
         └───────────────────┘
+
 ```
-
----
-
-## Liên hệ
-
-Nếu cần giải thích thêm logic nào, liên hệ backend team.
