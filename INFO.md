@@ -524,20 +524,6 @@ def should_move_to_breakeven(self, current_high: float) -> bool:
 
 ---
 
-### API Endpoints
-
-| Action | Method | URL |
-| --- | --- | --- |
-| Login | POST | `/auth-service/login` |
-| Get OTP | GET | `/auth-service/api/email-otp` |
-| Get Trading Token | POST | `/order-service/trading-token` |
-| Get Accounts | GET | `/order-service/accounts` |
-| Get Balance | GET | `/order-service/account-balances/{id}` |
-| Place Order | POST | `/order-service/v2/orders` |
-| Cancel Order | DELETE | `/order-service/v2/orders/{id}` |
-
----
-
 ## 10. Backtest Engine
 
 **File:** `src/core/backtest.py`
@@ -650,7 +636,6 @@ class BacktestResult:
         ┌───────────────────┐
         │  Save to DB       │
         │  Broadcast WS     │
-        │  Auto-trade?      │
         └───────────────────┘
 
 ```
