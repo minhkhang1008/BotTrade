@@ -6,64 +6,7 @@ BotTrade là hệ thống tạo tín hiệu giao dịch theo chiến lược k�
 
 ## 1) Cài đặt & Chạy
 
-### Yêu cầu
-- Python 3.11+
-- Node.js 18+
-- Git, pip, npm (hoặc pnpm/yarn)
-
-### Backend (FastAPI)
-```bash
-# Tạo virtualenv (macOS/Linux)
-python -m venv venv
-source venv/bin/activate
-
-# Cài dependencies
-pip install --upgrade pip
-pip install -r requirements.txt
-
-# Tạo file .env ở thư mục gốc
-cat > .env <<'ENV'
-DNSE_USERNAME=
-DNSE_PASSWORD=
-WATCHLIST=VNM,FPT,VIC
-TIMEFRAME=1H
-HOST=0.0.0.0
-PORT=8000
-
-# Telegram Notification (optional - để nhận thông báo khi có signal)
-TELEGRAM_BOT_TOKEN=
-TELEGRAM_CHAT_ID=
-TELEGRAM_ENABLED=True
-ENV
-
-# Chạy mock/demo mode (dữ liệu giả lập, database riêng)
-python run.py --mock
-
-# Hoặc production (dùng data DNSE thật)
-python run.py
-```
-
-### Frontend (React + Vite + Tailwind)
-```bash
-cd bottrade-ui
-npm install
-
-# Chạy mock API/WS cho UI độc lập
-npm run mock
-npm run dev   # http://localhost:5173
-```
-
-### Kết nối UI với backend Python
-Tạo `bottrade-ui/.env`:
-```
-VITE_API_URL=http://localhost:8000
-VITE_WS_URL=ws://localhost:8000/ws/v1/stream
-```
-
-### Kiểm tra nhanh
-- Swagger: http://localhost:8000/docs
-- Health: http://localhost:8000/api/v1/health
-- WS test: `new WebSocket('ws://localhost:8000/ws/v1/stream')`
+- Xem tại [HDSD.md](https://github.com/minhkhang1008/BotTrade/blob/master/HDSD.md)
 
 ---
 
