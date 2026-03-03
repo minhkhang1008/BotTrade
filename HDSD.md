@@ -104,3 +104,11 @@ python run.py --mock
 
 3. Mở giao diện web, truy cập mục **Settings**.
 4. Mở tính năng **Demo Scenario** để kích hoạt các kịch bản thị trường giả lập, cho phép bạn quan sát bot tính toán và ra lệnh trực quan nhất.
+
+--- 
+
+## 🔗 IV. Lấy các thông tin cấu hình .env ở đâu
+
+1. DNSE_USERNAME & DNSE_PASSWORD: Đăng ký sử dụng Lightspeed API tại: [https://entradex.dnse.com.vn/thong-tin-ca-nhan/light-speed](https://entradex.dnse.com.vn/thong-tin-ca-nhan/light-speed) và sử dụng username (email/sđt) và password đăng nhập EntradeX
+2. Telegram BotID: Tạo bot mới tại [@BotFather](https://web.telegram.org/a/#93372553), gõ lệnh /token, chọn Bot vừa tạo và copy token 
+3. Telegram ChatID: Sử dụng bot [@userinfobot](https://web.telegram.org/a/#52504489) và gõ lệnh /start sau đó copy phần id

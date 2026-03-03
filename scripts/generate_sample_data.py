@@ -1,118 +1,79 @@
 #!/usr/bin/env python3
-"""
-Generate sample data with candlestick patterns for backtest.
-This creates data that includes:
-- Uptrend structure (higher highs, higher lows)
-- Hammer patterns at support zones
-- Engulfing patterns
-"""
-import csv
+import asyncio
+import os
+import sys
 from datetime import datetime, timedelta
 import random
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-def generate_bars(symbol: str, start_date: datetime, num_bars: int = 100):
-    """Generate sample OHLC data with patterns."""
+from src.storage.database import db
+from src.core.models import Bar
+from src.core.signal_engine import SignalEngine
+from src.config import settings
+
+async def main():
+    os.environ["BOT_TRADE_MOCK_MODE"] = "true"
+    await db.connect()
+    
+    symbol = "VNM"
+    price = 70000.0
+    start_date = datetime(2024, 1, 2, 9, 0, 0)
     bars = []
     
-    # Starting price
-    price = 70000
-    base_volume = 100000
-    
-    # Generate uptrend with pullbacks
-    for i in range(num_bars):
-        # Trading hours: 9, 10, 11, 13, 14
+    for i in range(150):
         hours = [9, 10, 11, 13, 14]
         hour_idx = i % 5
         day_offset = i // 5
         
-        # Skip weekends
         date = start_date + timedelta(days=day_offset)
-        while date.weekday() >= 5:  # Saturday or Sunday
+        while date.weekday() >= 5:
             day_offset += 1
             date = start_date + timedelta(days=day_offset)
-        
+            
         timestamp = date.replace(hour=hours[hour_idx], minute=0, second=0)
         
-        # Trend bias (upward)
-        trend = 0.001  # 0.1% per bar on average
-        
-        # Add pullback cycles every 15-20 bars
-        cycle_pos = i % 18
-        if cycle_pos < 12:
-            # Uptrend phase
-            move = random.uniform(0, 0.008) + trend
-        else:
-            # Pullback phase
-            move = random.uniform(-0.006, 0.002)
-        
-        # Generate OHLC
+        move = random.uniform(-0.005, 0.008)
         open_price = price
+        close_price = open_price * (1 + move)
         
-        # Determine if bullish or bearish
-        is_bullish = move > 0
-        
-        # Check for pattern opportunities at pullback bottoms
-        is_hammer = False
-        is_engulfing = False
-        
-        if cycle_pos == 17 and len(bars) > 0:  # End of pullback
-            # Create Hammer pattern
-            is_hammer = True
+        cycle_pos = i % 18
+        if cycle_pos == 17:
             close_price = open_price + abs(move) * price
-            low_price = open_price - 0.015 * price  # Long lower shadow
+            low_price = open_price - 0.015 * price
             high_price = max(open_price, close_price) + 0.002 * price
-        elif cycle_pos == 16 and len(bars) > 0:
-            # Create bearish bar before hammer
-            close_price = open_price - 0.004 * price
-            low_price = close_price - 0.002 * price
-            high_price = open_price + 0.002 * price
         else:
-            # Normal bar
-            change = move * price
-            if is_bullish:
-                close_price = open_price + abs(change)
-                high_price = close_price + random.uniform(0, 0.003) * price
-                low_price = open_price - random.uniform(0, 0.002) * price
-            else:
-                close_price = open_price - abs(change)
-                high_price = open_price + random.uniform(0, 0.002) * price
-                low_price = close_price - random.uniform(0, 0.003) * price
-        
-        volume = base_volume * random.uniform(0.8, 1.5)
-        
-        bars.append({
-            'time': timestamp.strftime('%Y-%m-%d %H:%M:%S'),
-            'open': round(open_price),
-            'high': round(high_price),
-            'low': round(low_price),
-            'close': round(close_price),
-            'volume': int(volume)
-        })
-        
-        # Update price for next bar
+            high_price = max(open_price, close_price) * (1 + random.uniform(0, 0.003))
+            low_price = min(open_price, close_price) * (1 - random.uniform(0, 0.003))
+            
+        bar = Bar(
+            symbol=symbol,
+            timeframe="1H",
+            timestamp=timestamp,
+            open=round(open_price),
+            high=round(high_price),
+            low=round(low_price),
+            close=round(close_price),
+            volume=int(100000 * random.uniform(0.8, 1.5))
+        )
+        bars.append(bar)
         price = close_price
+        
+    await db.save_bars(bars)
     
-    return bars
-
-
-def main():
-    print("Generating sample data with patterns...")
+    engine = SignalEngine(
+        zone_width_atr_mult=settings.zone_width_atr_multiplier,
+        sl_buffer_atr_mult=settings.sl_buffer_atr_multiplier,
+        risk_reward_ratio=settings.risk_reward_ratio,
+        default_quantity=settings.default_quantity
+    )
     
-    start = datetime(2024, 1, 2)
-    bars = generate_bars("VNM", start, num_bars=150)
-    
-    # Save to CSV
-    output_file = "data/VNM_1H.csv"
-    with open(output_file, 'w', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=['time', 'open', 'high', 'low', 'close', 'volume'])
-        writer.writeheader()
-        writer.writerows(bars)
-    
-    print(f"✅ Generated {len(bars)} bars")
-    print(f"   Saved to: {output_file}")
-    print(f"   Price range: {bars[0]['open']:,} → {bars[-1]['close']:,}")
-
+    for bar in bars:
+        res = engine.add_bar(bar)
+        if res and res.should_signal and res.signal:
+            await db.save_signal(res.signal)
+            
+    await db.disconnect()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
