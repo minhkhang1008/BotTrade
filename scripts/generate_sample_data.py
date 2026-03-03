@@ -3,76 +3,104 @@ import asyncio
 import os
 import sys
 from datetime import datetime, timedelta
-import random
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.storage.database import db
 from src.core.models import Bar
-from src.core.signal_engine import SignalEngine
-from src.config import settings
+
+def create_bar(symbol, timestamp, o, h, l, c):
+    return Bar(
+        symbol=symbol, timeframe="1H", timestamp=timestamp,
+        open=round(o), high=round(h), low=round(l), close=round(c), 
+        volume=250000
+    )
+
+def next_time(current_time):
+    hours = [9, 10, 11, 13, 14]
+    try:
+        idx = hours.index(current_time.hour)
+        if idx < len(hours) - 1:
+            return current_time.replace(hour=hours[idx + 1])
+    except ValueError:
+        pass
+    next_day = current_time + timedelta(days=1)
+    while next_day.weekday() >= 5:
+        next_day += timedelta(days=1)
+    return next_day.replace(hour=9)
 
 async def main():
     os.environ["BOT_TRADE_MOCK_MODE"] = "true"
     await db.connect()
     
-    symbol = "VNM"
-    price = 70000.0
-    start_date = datetime(2024, 1, 2, 9, 0, 0)
-    bars = []
+    symbols = ["VNM", "FPT", "VIC", "VHM", "HPG"]
+    all_bars = []
     
-    for i in range(150):
-        hours = [9, 10, 11, 13, 14]
-        hour_idx = i % 5
-        day_offset = i // 5
+    for symbol in symbols:
+        bars = []
+        current_time = datetime(2024, 1, 1, 9, 0, 0)
         
-        date = start_date + timedelta(days=day_offset)
-        while date.weekday() >= 5:
-            day_offset += 1
-            date = start_date + timedelta(days=day_offset)
-            
-        timestamp = date.replace(hour=hours[hour_idx], minute=0, second=0)
+        def add_bar(o, c, h=None, l=None):
+            nonlocal current_time
+            if h is None: h = max(o, c) + 10
+            if l is None: l = min(o, c) - 10
+            bars.append(create_bar(symbol, current_time, o, h, l, c))
+            current_time = next_time(current_time)
+
+        # Hàm "đúc" mô hình nến đảo chiều để ép bot nhận diện Pivot
+        def make_bearish_engulfing(peak_price):
+            add_bar(peak_price - 100, peak_price)  # Nến xanh
+            add_bar(peak_price + 10, peak_price - 150) # Nến đỏ bao trùm (-> Pivot High)
+
+        def make_bullish_engulfing(trough_price):
+            add_bar(trough_price + 100, trough_price) # Nến đỏ
+            add_bar(trough_price - 10, trough_price + 150) # Nến xanh bao trùm (-> Pivot Low)
+
+        # 1. Khởi động: Bơm RSI lên cao (>50)
+        price = 50000
+        for _ in range(50):
+            add_bar(price, price + 100)
+            price += 100
+
+        # 2. Xây dựng 4 nhịp sóng (Uptrend: Đỉnh sau cao hơn, Đáy sau cao hơn)
+        # Sóng 1
+        while price < 56000: add_bar(price, price + 100); price += 100
+        make_bearish_engulfing(56000) 
+        price = 56000 - 150
+        while price > 55500: add_bar(price, price - 100); price -= 100
+        make_bullish_engulfing(55500) 
+        price = 55500 + 150
+
+        # Sóng 2
+        while price < 56500: add_bar(price, price + 100); price += 100
+        make_bearish_engulfing(56500) 
+        price = 56500 - 150
+        while price > 56000: add_bar(price, price - 100); price -= 100
+        make_bullish_engulfing(56000) 
+        price = 56000 + 150
+
+        # Sóng 3
+        while price < 57000: add_bar(price, price + 100); price += 100
+        make_bearish_engulfing(57000) 
+        price = 57000 - 150
+        while price > 56500: add_bar(price, price - 100); price -= 100
+        make_bullish_engulfing(56500) 
+        price = 56500 + 150
+
+        # Sóng 4 (Chỉ tạo đỉnh rồi rơi từ từ xuống Support)
+        while price < 57500: add_bar(price, price + 100); price += 100
+        make_bearish_engulfing(57500) 
+        price = 57500 - 150
+        while price > 57050: add_bar(price, price - 100); price -= 100
+
+        # 3. Kích hoạt tín hiệu (Trigger) bằng NẾN BÚA hoàn hảo
+        # Thân nến cực mỏng (10), Râu dưới siêu dài (80), Râu trên cực ngắn (2)
+        add_bar(o=57050, c=57060, h=57062, l=56970)
         
-        move = random.uniform(-0.005, 0.008)
-        open_price = price
-        close_price = open_price * (1 + move)
+        all_bars.extend(bars)
         
-        cycle_pos = i % 18
-        if cycle_pos == 17:
-            close_price = open_price + abs(move) * price
-            low_price = open_price - 0.015 * price
-            high_price = max(open_price, close_price) + 0.002 * price
-        else:
-            high_price = max(open_price, close_price) * (1 + random.uniform(0, 0.003))
-            low_price = min(open_price, close_price) * (1 - random.uniform(0, 0.003))
-            
-        bar = Bar(
-            symbol=symbol,
-            timeframe="1H",
-            timestamp=timestamp,
-            open=round(open_price),
-            high=round(high_price),
-            low=round(low_price),
-            close=round(close_price),
-            volume=int(100000 * random.uniform(0.8, 1.5))
-        )
-        bars.append(bar)
-        price = close_price
-        
-    await db.save_bars(bars)
-    
-    engine = SignalEngine(
-        zone_width_atr_mult=settings.zone_width_atr_multiplier,
-        sl_buffer_atr_mult=settings.sl_buffer_atr_multiplier,
-        risk_reward_ratio=settings.risk_reward_ratio,
-        default_quantity=settings.default_quantity
-    )
-    
-    for bar in bars:
-        res = engine.add_bar(bar)
-        if res and res.should_signal and res.signal:
-            await db.save_signal(res.signal)
-            
+    await db.save_bars(all_bars)
+    print("✅ Đã tạo kịch bản: 4 Đỉnh, 4 Đáy hoàn hảo, kèm Nến Búa và RSI > 50!")
     await db.disconnect()
 
 if __name__ == "__main__":

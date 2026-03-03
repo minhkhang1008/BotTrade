@@ -305,32 +305,41 @@ class BotTradeApp:
         logger.info(f"📊 Watchlist updated: {new_symbols}")
 
     async def start_demo_mode(self):
-        """
-        Start demo mode - generates mock bars that lead to signals.
-        This is for presentation purposes.
-        
-        In demo mode:
-        1. Reset signal engines (clear old bars/pivots)
-        2. Generate bars that will trigger a BUY signal
-        """
-        if not self.use_mock:
-            logger.warning("Demo mode only available in mock mode")
-            return
-        
-        if not isinstance(self.dnse_adapter, MockDNSEAdapter):
-            logger.warning("Demo mode requires MockDNSEAdapter")
-            return
-        
-        logger.info("🎬 Starting demo mode...")
-        
-        # Reset signal engines for demo (clear old data to start fresh)
-        for symbol in self._current_symbols:
-            if symbol in self.signal_engines:
-                self.signal_engines[symbol].reset()
-                logger.info(f"🔄 Reset signal engine for {symbol}")
-        
-        # Start generating demo bars that will trigger a signal
-        asyncio.create_task(self.dnse_adapter.generate_demo_signal_scenario())
+            """
+            Start REPLAY mode - uses existing seed data but plays it back
+            bar-by-bar to simulate real-time condition checking.
+            """
+            logger.info("🎬 Starting REPLAY Mode (Phát lại dữ liệu mẫu)...")
+            
+            for symbol in self._current_symbols:
+                # 1. Lấy data mẫu từ DB ra
+                all_bars = await db.get_bars(symbol, settings.timeframe, limit=200)
+                if len(all_bars) < 30:
+                    logger.warning(f"Không đủ data để replay cho {symbol}")
+                    continue
+                
+                # 2. Cắt 30 cây nến cuối cùng ra làm dữ liệu "Live" để phát từ từ
+                replay_count = 30
+                history_bars = all_bars[:-replay_count]
+                replay_bars = all_bars[-replay_count:]
+                
+                # 3. Reset "Bộ não" về quá khứ (chỉ nạp phần lịch sử)
+                if symbol in self.signal_engines:
+                    self.signal_engines[symbol].reset()
+                    self.signal_engines[symbol].load_bars(history_bars)
+                    logger.info(f"🔄 Đã đưa {symbol} về quá khứ (Đang nạp {len(history_bars)} nến lịch sử)")
+                
+                # 4. Kịch bản phát lại (Background Task)
+                async def replay_task(sym, bars):
+                    logger.info(f"▶️ Bắt đầu phát lại {len(bars)} nến cho {sym}...")
+                    for b in bars:
+                        # Đẩy từng cây nến vào hệ thống y như dữ liệu thật chạy realtime
+                        await self._on_bar_closed(b)
+                        await asyncio.sleep(1)  # Delay 1.5s mỗi nến để bạn kịp xem Dashboard nhảy
+                    logger.info(f"✅ Hoàn thành Replay cho {sym}")
+
+                # Kích hoạt luồng phát lại chạy ngầm
+                asyncio.create_task(replay_task(symbol, replay_bars))
 
     async def force_demo_signal(self, symbol: str = None) -> Signal:
         """
@@ -439,7 +448,7 @@ class BotTradeApp:
                 on_disconnected=self._on_disconnected
             )
             await self.dnse_adapter.connect(self._current_symbols, settings.timeframe)
-            asyncio.create_task(self.dnse_adapter.simulate_bars(interval_seconds=10))
+            # asyncio.create_task(self.dnse_adapter.simulate_bars(interval_seconds=10))
         else:
             # Debug: print settings to see if env is loaded
             logger.info(f"DNSE Config check - username: '{settings.dnse_username[:3] if settings.dnse_username else 'EMPTY'}***', mqtt_url: '{settings.dnse_mqtt_url}'")
