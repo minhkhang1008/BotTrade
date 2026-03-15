@@ -1,180 +1,74 @@
-"""
-Bot Trade - Notification Service
-Sends notifications via Telegram when signals are triggered.
-
-Setup:
-1. Create a Telegram bot via @BotFather -> Get BOT_TOKEN
-2. Start chat with your bot and send /start
-3. Get your Chat ID via @userinfobot or https://api.telegram.org/bot<TOKEN>/getUpdates
-4. Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env
-"""
-import asyncio
 import logging
-from typing import Optional
-from datetime import datetime
-
 import httpx
-
-from ..core.models import Signal, SignalType
+from src.core.models import Signal
+from src.storage.database import db
 
 logger = logging.getLogger(__name__)
 
+_notification_service = None
 
 class NotificationService:
-    """
-    Telegram notification service for trading signals.
-    
-    Sends push notifications to Telegram - works even when web is closed.
-    """
-    
-    TELEGRAM_API_URL = "https://api.telegram.org/bot{token}/sendMessage"
-    
-    def __init__(self, bot_token: str = "", chat_id: str = ""):
+    def __init__(self, bot_token: str):
         self.bot_token = bot_token
-        self.chat_id = chat_id
-        self._enabled = bool(bot_token and chat_id)
-        
-        if self._enabled:
-            logger.info("✅ Telegram notifications enabled")
-        else:
-            logger.warning("⚠️ Telegram notifications disabled (missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID)")
-    
-    @property
-    def is_enabled(self) -> bool:
-        """Check if notifications are enabled."""
-        return self._enabled
-    
-    def configure(self, bot_token: str, chat_id: str):
-        """Configure or update Telegram credentials."""
-        self.bot_token = bot_token
-        self.chat_id = chat_id
-        self._enabled = bool(bot_token and chat_id)
-        
-        if self._enabled:
-            logger.info("✅ Telegram notifications configured")
-    
-    async def send_message(self, text: str, parse_mode: str = "HTML") -> bool:
+        self.is_enabled = bool(bot_token)
+
+    async def send_signal_notification(self, signal: Signal):
         """
-        Send a message to Telegram.
-        
-        Args:
-            text: Message text (supports HTML formatting)
-            parse_mode: HTML or Markdown
-            
-        Returns:
-            True if sent successfully
+        Gửi tín hiệu Telegram ĐÍCH DANH cho những user đang theo dõi mã này.
+        Hàm này sẽ gọi xuống database để lọc ra danh sách user_id và chat_id phù hợp.
         """
-        if not self._enabled:
-            logger.debug("Notification skipped: Telegram not configured")
-            return False
+        if not self.is_enabled:
+            return
+
+        # 1. Lấy danh sách những người ĐANG THEO DÕI mã cổ phiếu này (có chat_id)
+        target_users = await db.get_users_tracking_symbol(signal.symbol)
         
-        url = self.TELEGRAM_API_URL.format(token=self.bot_token)
-        payload = {
-            "chat_id": self.chat_id,
-            "text": text,
-            "parse_mode": parse_mode,
-            "disable_web_page_preview": True
-        }
-        
+        if not target_users:
+            logger.info(f"🔕 Bỏ qua Telegram: Không có user nào theo dõi mã {signal.symbol} hoặc chưa liên kết Telegram.")
+            return
+
+        # 2. Định dạng tin nhắn gửi đi an toàn (tránh lỗi thiếu thuộc tính type)
+        signal_action = "BUY"
+        if hasattr(signal, 'type') and signal.type:
+            signal_action = signal.type.value if hasattr(signal.type, 'value') else str(signal.type)
+        elif hasattr(signal, 'action') and signal.action:
+            signal_action = signal.action.value if hasattr(signal.action, 'value') else str(signal.action)
+
+        message = (
+            f"🔔 TÍN HIỆU {signal_action}: {signal.symbol}\n"
+            f"💰 Giá vào: {signal.entry:,.0f}\n"
+            f"🛑 Cắt lỗ: {signal.stop_loss:,.0f}\n"
+            f"🎯 Chốt lời: {signal.take_profit:,.0f}\n"
+            f"-----------------------\n"
+            f"🤖 BotTrade cá nhân hóa"
+        )
+
+        # 3. Rải tin nhắn bằng httpx
+        success_count = 0
         try:
             async with httpx.AsyncClient() as client:
-                response = await client.post(url, json=payload, timeout=10.0)
-                
-                if response.status_code == 200:
-                    logger.info("📱 Telegram notification sent")
-                    return True
-                else:
-                    logger.error(f"Telegram API error: {response.status_code} - {response.text}")
-                    return False
-                    
+                for user in target_users:
+                    chat_id = user["chat_id"]
+                    try:
+                        resp = await client.post(
+                            f"https://api.telegram.org/bot{self.bot_token}/sendMessage",
+                            json={"chat_id": chat_id, "text": message}
+                        )
+                        if resp.status_code == 200:
+                            success_count += 1
+                        else:
+                            logger.error(f"❌ Telegram API lỗi {resp.status_code} cho chat_id {chat_id}: {resp.text}")
+                    except Exception as req_e:
+                        logger.error(f"❌ Lỗi HTTP khi gửi cho chat_id {chat_id}: {req_e}")
+                        
+            logger.info(f"✅ Đã bắn tỉa tín hiệu {signal.symbol} tới {success_count}/{len(target_users)} users.")
         except Exception as e:
-            logger.error(f"Failed to send Telegram notification: {e}")
-            return False
-    
-    async def send_signal_notification(self, signal: Signal) -> bool:
-        """
-        Send trading signal notification.
-        
-        Args:
-            signal: The trading signal to notify about
-            
-        Returns:
-            True if sent successfully
-        """
-        # Calculate risk/reward info
-        risk = abs(signal.entry - signal.stop_loss)
-        reward = abs(signal.take_profit - signal.entry)
-        rr_ratio = reward / risk if risk > 0 else 0
-        
-        # Determine signal emoji
-        if signal.signal_type == SignalType.BUY:
-            emoji = "🟢"
-            action = "MUA"
-        else:
-            emoji = "🔴"
-            action = "BÁN"
-        
-        # Format message
-        message = f"""
-{emoji} <b>TÍN HIỆU {action}</b> {emoji}
+            logger.error(f"❌ Lỗi tổng rải Telegram: {e}")
 
-<b>Mã:</b> {signal.symbol}
-<b>Giá vào:</b> {signal.entry:,.0f} VND
-<b>Stop Loss:</b> {signal.stop_loss:,.0f} VND
-<b>Take Profit:</b> {signal.take_profit:,.0f} VND
+def init_notification_service(bot_token: str, chat_id: str = None) -> NotificationService:
+    global _notification_service
+    _notification_service = NotificationService(bot_token)
+    return _notification_service
 
-📊 <b>Chi tiết:</b>
-• Risk: {risk:,.0f} VND ({risk/signal.entry*100:.2f}%)
-• Reward: {reward:,.0f} VND ({reward/signal.entry*100:.2f}%)
-• R:R = 1:{rr_ratio:.1f}
-• Số lượng: {signal.quantity} cổ phiếu
-
-🕐 {datetime.now().strftime("%H:%M:%S %d/%m/%Y")}
-
-<i>Lý do: {signal.reason or "N/A"}</i>
-"""
-        
-        return await self.send_message(message.strip())
-    
-    async def send_system_notification(self, title: str, message: str) -> bool:
-        """
-        Send system notification (connection status, errors, etc.)
-        
-        Args:
-            title: Notification title
-            message: Notification message
-            
-        Returns:
-            True if sent successfully
-        """
-        text = f"🤖 <b>{title}</b>\n\n{message}"
-        return await self.send_message(text)
-    
-    async def send_test_notification(self) -> bool:
-        """Send a test notification to verify setup."""
-        message = """
-🔔 <b>Test Notification</b>
-
-✅ Telegram notifications are working!
-
-This message confirms that your BotTrade notification setup is correct.
-
-🤖 BotTrade - Trading Signal Assistant
-"""
-        return await self.send_message(message.strip())
-
-
-# Global instance (will be configured in main.py)
-notification_service: Optional[NotificationService] = None
-
-
-def get_notification_service() -> Optional[NotificationService]:
-    """Get the global notification service instance."""
-    return notification_service
-
-
-def init_notification_service(bot_token: str = "", chat_id: str = "") -> NotificationService:
-    """Initialize the global notification service."""
-    global notification_service
-    notification_service = NotificationService(bot_token, chat_id)
-    return notification_service
+def get_notification_service() -> NotificationService:
+    return _notification_service

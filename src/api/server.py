@@ -174,6 +174,8 @@ app = FastAPI(
     version="0.1.0"
     # lifespan is NOT set here - handled by main.py
 )
+from .telegram_webhook import router as telegram_router
+app.include_router(telegram_router, prefix="/api/v1")
 
 # CORS middleware
 app.add_middleware(

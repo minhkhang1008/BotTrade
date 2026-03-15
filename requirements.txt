@@ -3,7 +3,7 @@
 # API Framework
 fastapi==0.109.0
 uvicorn[standard]==0.27.0
-websockets==12.0
+websockets>=14.0,<16.0
 
 # MQTT Client for DNSE
 paho-mqtt==2.0.0
