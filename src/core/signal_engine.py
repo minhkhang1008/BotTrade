@@ -1,6 +1,6 @@
 """
-Bot Trade - Signal Generation Engine
-Main logic for generating BUY signals
+Bot Trade - Signal Generation Engine (AI & Scoring Integrated)
+Main logic for generating BUY signals based on Technical + AI Sentiment
 """
 from typing import List, Optional
 from datetime import datetime
@@ -28,6 +28,9 @@ class SignalCheckResult:
     signal: Optional[Signal] = None
     reasons: List[str] = None
     failed_conditions: List[str] = None
+    total_score: float = 0.0
+    tech_score: float = 0.0
+    ai_sentiment: int = 0
     
     def __post_init__(self):
         if self.reasons is None:
@@ -38,13 +41,10 @@ class SignalCheckResult:
 
 class SignalEngine:
     """
-    Main signal generation engine.
+    Main signal generation engine with AI Scoring System.
     
-    Generates BUY signals when ALL conditions are met:
-    1. Uptrend (3 higher highs + 3 higher lows)
-    2. Price touches support zone
-    3. Bullish reversal pattern detected
-    4. Confirmation: MACD crossover OR RSI > 50
+    Generates BUY signals when Total Score >= TRIGGER_THRESHOLD
+    Total Score = Technical Score + AI Sentiment Score
     """
     
     def __init__(
@@ -57,12 +57,14 @@ class SignalEngine:
         macd_fast: int = 12,
         macd_slow: int = 26,
         macd_signal: int = 9,
-        atr_period: int = 14
+        atr_period: int = 14,
+        trigger_threshold: int = 5  # Ngưỡng điểm kích hoạt lệnh Mua
     ):
         self.zone_width_atr_mult = zone_width_atr_mult
         self.sl_buffer_atr_mult = sl_buffer_atr_mult
         self.risk_reward_ratio = risk_reward_ratio
         self.default_quantity = default_quantity
+        self.trigger_threshold = trigger_threshold
         
         # Indicator settings
         self.rsi_period = rsi_period
@@ -79,15 +81,13 @@ class SignalEngine:
         self.bars: List[Bar] = []
         self.previous_macd: Optional[MACDResult] = None
     
-    def add_bar(self, bar: Bar) -> Optional[SignalCheckResult]:
+    def add_bar(self, bar: Bar, ai_sentiment: int = 0) -> Optional[SignalCheckResult]:
         """
-        Add new bar and check for signals.
+        Add new bar, apply AI sentiment, and check for signals.
         
         Args:
             bar: New closed bar
-        
-        Returns:
-            SignalCheckResult if bar processed, None if error
+            ai_sentiment: Sentiment score from AI (-3 to +3)
         """
         self.bars.append(bar)
         bar_index = len(self.bars) - 1
@@ -95,8 +95,8 @@ class SignalEngine:
         # Detect pivot on this bar
         self.pivot_detector.process_bar(self.bars, bar_index)
         
-        # Check for signal
-        result = self.check_signal()
+        # Check for signal (Truyền điểm AI vào hàm check)
+        result = self.check_signal(ai_sentiment=ai_sentiment)
         
         # Update previous MACD for next crossover check
         closes = [b.close for b in self.bars]
@@ -107,15 +107,13 @@ class SignalEngine:
         
         return result
     
-    def check_signal(self) -> SignalCheckResult:
+    def check_signal(self, ai_sentiment: int = 0) -> SignalCheckResult:
         """
-        Check all conditions for BUY signal.
-        
-        Returns:
-            SignalCheckResult with signal if conditions met
+        Check conditions using the FreqAI Scoring concept.
         """
         reasons = []
         failed = []
+        tech_score = 0
         
         if len(self.bars) < 2:
             return SignalCheckResult(
@@ -124,9 +122,6 @@ class SignalEngine:
             )
         
         current_bar = self.bars[-1]
-        
-        # Log current state for debugging
-        logger.debug(f"📋 Checking signal for {current_bar.symbol} | Bars: {len(self.bars)} | Pivot lows: {len(self.pivot_detector.pivot_lows)} | Pivot highs: {len(self.pivot_detector.pivot_highs)}")
         
         # Get indicators
         indicators = get_all_indicators(
@@ -144,90 +139,74 @@ class SignalEngine:
                 failed_conditions=["ATR not available (need more data)"]
             )
         
-        # Condition 1: Check uptrend
+        # --- TECHNICAL SCORING (Max 7 points) ---
+        
+        # 1. Trend Analysis (+2 Points)
         trend_result = self.trend_analyzer.analyze(
             self.pivot_detector.pivot_lows,
             self.pivot_detector.pivot_highs
         )
-        
-        if not trend_result.is_uptrend:
-            failed.append(f"No uptrend: {trend_result.reason}")
-            logger.debug(f"❌ Trend check failed: {trend_result.reason}")
+        if trend_result.is_uptrend:
+            tech_score += 2
+            reasons.append(f"✓ Xu hướng tăng rõ ràng (+2 điểm)")
         else:
-            reasons.append(f"✓ Uptrend: {trend_result.reason}")
-            logger.debug(f"✅ Trend check passed: {trend_result.reason}")
-        
-        # Condition 2: Price touches support zone
+            failed.append(f"Chưa có xu hướng tăng: {trend_result.reason}")
+            
+        # 2. Support Zone (+2 Points)
         support_zone = self._get_support_zone(indicators.atr)
-        if support_zone is None:
-            failed.append("No support zone available")
-            logger.debug(f"❌ No support zone (need at least 1 pivot low)")
+        if support_zone and support_zone.contains_price(current_bar.low, current_bar.high):
+            tech_score += 2
+            reasons.append(f"✓ Giá chạm vùng hỗ trợ an toàn (+2 điểm)")
         else:
-            if support_zone.contains_price(current_bar.low, current_bar.high):
-                reasons.append(
-                    f"✓ Price in support zone [{support_zone.zone_low:.2f} - {support_zone.zone_high:.2f}]"
-                )
-                logger.debug(f"✅ Price in support zone [{support_zone.zone_low:.0f} - {support_zone.zone_high:.0f}]")
-            else:
-                failed.append(
-                    f"Price not in support zone [{support_zone.zone_low:.2f} - {support_zone.zone_high:.2f}]"
-                )
-                logger.debug(f"❌ Price {current_bar.low:.0f}-{current_bar.high:.0f} not in zone [{support_zone.zone_low:.0f} - {support_zone.zone_high:.0f}]")
-        
-        # Condition 3: Bullish reversal pattern
+            failed.append("Giá không nằm trong vùng hỗ trợ")
+
+        # 3. Reversal Pattern (+1 Point)
         pattern = detect_bullish_reversal(self.bars)
         if pattern:
-            reasons.append(f"✓ Bullish reversal: {pattern.value}")
-            logger.debug(f"✅ Pattern detected: {pattern.value}")
+            tech_score += 1
+            reasons.append(f"✓ Nến đảo chiều {pattern.value} (+1 điểm)")
         else:
-            failed.append("No bullish reversal pattern")
-            logger.debug(f"❌ No bullish pattern | Bar: O:{current_bar.open:.0f} H:{current_bar.high:.0f} L:{current_bar.low:.0f} C:{current_bar.close:.0f} | Body:{current_bar.body_size:.0f} LowerWick:{current_bar.lower_shadow:.0f} UpperWick:{current_bar.upper_shadow:.0f}")
-        
-        # Condition 4: Confirmation (MACD cross OR RSI > 50)
-        confirmation = False
-        confirmation_reason = ""
-        
-        # Check MACD crossover
+            failed.append("Không có mẫu hình nến đảo chiều")
+            
+        # 4. Momentum / Confirmation (+2 Points for MACD, +1 for RSI)
         closes = [b.close for b in self.bars]
-        current_macd = calculate_macd(
-            closes, self.macd_fast, self.macd_slow, self.macd_signal
-        )
+        current_macd = calculate_macd(closes, self.macd_fast, self.macd_slow, self.macd_signal)
         
         if check_macd_crossover(current_macd, self.previous_macd):
-            confirmation = True
-            confirmation_reason = "MACD bullish crossover"
+            tech_score += 2
+            reasons.append(f"✓ Động lượng mạnh: MACD cắt lên (+2 điểm)")
         elif indicators.rsi is not None and indicators.rsi > 50:
-            confirmation = True
-            confirmation_reason = f"RSI > 50 ({indicators.rsi:.1f})"
-        
-        if confirmation:
-            reasons.append(f"✓ Confirmation: {confirmation_reason}")
-            logger.debug(f"✅ Confirmation: {confirmation_reason}")
+            tech_score += 1
+            reasons.append(f"✓ RSI > 50 xác nhận đà tăng (+1 điểm)")
         else:
-            rsi_str = f"{indicators.rsi:.1f}" if indicators.rsi else "N/A"
-            failed.append(f"No confirmation (MACD no cross, RSI={rsi_str})")
-            logger.debug(f"❌ No confirmation: RSI={rsi_str}")
+            failed.append("Chưa có xác nhận từ MACD/RSI")
+
+        # --- TỔNG HỢP ĐIỂM SỐ (Total Score) ---
+        total_score = tech_score + ai_sentiment
         
-        # All conditions must pass
-        all_passed = len(failed) == 0 and len(reasons) >= 4
+        # Log AI Effect
+        if ai_sentiment != 0:
+            ai_emoji = "🔥" if ai_sentiment > 0 else "🧊"
+            reasons.append(f"{ai_emoji} AI Sentiment: Vĩ mô tác động ({'+' if ai_sentiment > 0 else ''}{ai_sentiment} điểm)")
+            logger.info(f"🧠 [AI SCORING] {current_bar.symbol}: Kỹ thuật ({tech_score}) + AI ({ai_sentiment}) = Tổng {total_score}")
+
+        # --- RA QUYẾT ĐỊNH ---
+        is_triggered = total_score >= self.trigger_threshold
         
-        # Log summary
-        if len(reasons) > 0 or len(failed) > 0:
-            logger.info(f"📊 Signal check for {current_bar.symbol}: {len(reasons)}/4 conditions passed")
-            if len(reasons) >= 2:  # Close to triggering
-                for r in reasons:
-                    logger.info(f"    {r}")
-                for f in failed:
-                    logger.info(f"    ❌ {f}")
-        
-        if not all_passed:
+        if not is_triggered:
             return SignalCheckResult(
                 should_signal=False,
                 reasons=reasons,
-                failed_conditions=failed
+                failed_conditions=failed,
+                total_score=total_score,
+                tech_score=tech_score,
+                ai_sentiment=ai_sentiment
             )
         
-        # Generate signal
+        # Nếu đủ điểm -> Phát tín hiệu Mua
+        logger.info(f"🚀 [SIGNAL TRIGGERED] {current_bar.symbol} đạt {total_score}/{self.trigger_threshold} điểm!")
+        reasons.insert(0, f"🎯 TỔNG ĐIỂM ĐÁNH GIÁ: {total_score}/{self.trigger_threshold}")
+        
         signal = self._create_signal(
             current_bar,
             indicators.atr,
@@ -238,7 +217,10 @@ class SignalEngine:
         return SignalCheckResult(
             should_signal=True,
             signal=signal,
-            reasons=reasons
+            reasons=reasons,
+            total_score=total_score,
+            tech_score=tech_score,
+            ai_sentiment=ai_sentiment
         )
     
     def _get_support_zone(self, atr: float) -> Optional[SupportZone]:
@@ -261,7 +243,7 @@ class SignalEngine:
         pattern: CandlePattern,
         reasons: List[str]
     ) -> Signal:
-        """Create BUY signal with SL/TP."""
+        """Create BUY signal with SL/TP based on ATR."""
         entry = bar.close
         
         # SL below previous pivot low
@@ -269,10 +251,8 @@ class SignalEngine:
         if prev_pivot:
             sl = prev_pivot.price - (self.sl_buffer_atr_mult * atr)
         else:
-            # Fallback: use current bar low
             sl = bar.low - (self.sl_buffer_atr_mult * atr)
         
-        # TP based on RR ratio
         risk = entry - sl
         tp = entry + (self.risk_reward_ratio * risk)
         
@@ -300,7 +280,6 @@ class SignalEngine:
             bar_index = len(self.bars) - 1
             self.pivot_detector.process_bar(self.bars, bar_index)
         
-        # Set previous MACD
         if len(self.bars) >= 2:
             closes = [b.close for b in self.bars[:-1]]
             self.previous_macd = calculate_macd(
@@ -314,20 +293,9 @@ class SignalEngine:
         self.previous_macd = None
     
     def generate_demo_signal(self, symbol: str, bar: Optional[Bar] = None) -> Signal:
-        """
-        Generate a demo BUY signal for presentation purposes.
-        This bypasses the normal signal conditions for demo mode.
-        
-        Args:
-            symbol: The stock symbol
-            bar: Optional current bar (for realistic prices)
-        
-        Returns:
-            A demo Signal object
-        """
+        """Generate a demo BUY signal."""
         import random
         
-        # Use bar prices if available, otherwise generate
         if bar:
             entry = bar.close
             base_price = bar.close
@@ -335,18 +303,16 @@ class SignalEngine:
             base_price = 50000 + random.uniform(-5000, 10000)
             entry = base_price
         
-        # Calculate realistic SL/TP
-        atr = base_price * 0.02  # Assume 2% ATR
-        sl = entry - (atr * 1.5)  # SL 1.5 ATR below
+        atr = base_price * 0.02
+        sl = entry - (atr * 1.5)
         risk = entry - sl
         tp = entry + (self.risk_reward_ratio * risk)
         
         demo_reasons = [
-            "📊 DEMO MODE - Signal for presentation",
-            "✅ Uptrend: 3 higher highs + 3 higher lows detected",
-            "✅ Price at support zone (previous pivot low)",
-            "✅ Bullish reversal: Hammer pattern detected",
-            "✅ Confirmation: MACD bullish crossover + RSI > 50"
+            "🎯 TỔNG ĐIỂM ĐÁNH GIÁ: 6/5",
+            "✓ Kỹ thuật: Xu hướng tăng + Hỗ trợ (+4 điểm)",
+            "🔥 AI Sentiment: Tích cực từ CafeF (+2 điểm)",
+            "📊 DEMO MODE - Signal for presentation"
         ]
         
         return Signal(

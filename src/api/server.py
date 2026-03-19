@@ -37,6 +37,15 @@ def set_force_demo_signal_callback(callback: Callable[[str], Awaitable[Signal]])
     _force_demo_signal_callback = callback
 
 
+# Callback for sentiment updates from external crawler (set by main.py)
+_sentiment_update_callback: Optional[Callable[[dict], Awaitable[None]]] = None
+
+def set_sentiment_update_callback(callback: Callable[[dict], Awaitable[None]]):
+    """Register callback for sentiment updates from external crawler."""
+    global _sentiment_update_callback
+    _sentiment_update_callback = callback
+
+
 # ============ Pydantic Models for API ============
 
 class HealthResponse(BaseModel):
@@ -63,6 +72,10 @@ class SettingsResponse(BaseModel):
 class SettingsUpdate(BaseModel):
     watchlist: Optional[List[str]] = None
     default_quantity: Optional[int] = None
+
+
+class SentimentUpdateRequest(BaseModel):
+    sentiments: Dict[str, int]  # e.g. {"FPT": 2, "HPG": -1}
 
 
 class SignalResponse(BaseModel):
@@ -460,9 +473,11 @@ async def broadcast_signal(signal: Signal):
     await manager.broadcast("signal", signal.to_dict())
 
 
-async def broadcast_signal_check(symbol: str, bar_data: dict, conditions_passed: int, 
+async def broadcast_signal_check(symbol: str, bar_data: dict, conditions_passed: int,
                                   total_conditions: int, passed: list, failed: list,
-                                  indicators: dict = None, analysis_details: dict = None):
+                                  indicators: dict = None, analysis_details: dict = None,
+                                  total_score: float = None, tech_score: float = None,
+                                  ai_sentiment: int = None, trigger_threshold: int = None):
     """Broadcast signal check progress for UI visualization."""
     data = {
         "symbol": symbol,
@@ -473,6 +488,10 @@ async def broadcast_signal_check(symbol: str, bar_data: dict, conditions_passed:
         "failed": failed,
         "indicators": indicators or {},
         "analysis": analysis_details or {},
+        "total_score": total_score,
+        "tech_score": tech_score,
+        "ai_sentiment": ai_sentiment,
+        "trigger_threshold": trigger_threshold,
         "timestamp": datetime.now().isoformat()
     }
     # Cache for new WebSocket clients
@@ -606,5 +625,26 @@ async def test_notification():
         return {"message": "Test notification sent successfully! Check your Telegram."}
     else:
         raise HTTPException(status_code=500, detail="Failed to send test notification. Check bot token and chat ID.")
+
+
+@app.post("/api/v1/sentiments")
+async def update_sentiments(request: SentimentUpdateRequest):
+    """Receive sentiment scores from the external crawler process."""
+    if _sentiment_update_callback:
+        try:
+            await _sentiment_update_callback(request.sentiments)
+            return {
+                "status": "ok",
+                "updated_symbols": list(request.sentiments.keys()),
+                "count": len(request.sentiments)
+            }
+        except Exception as e:
+            logger.error(f"Failed to process sentiment update: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+    else:
+        raise HTTPException(
+            status_code=503,
+            detail="Sentiment update callback not registered"
+        )
 
 

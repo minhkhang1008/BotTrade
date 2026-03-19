@@ -134,6 +134,39 @@ class Database:
         return await asyncio.to_thread(_get)
     # Bổ sung vào src/storage/database.py (trong class Database)
     
+    async def save_sentiment(self, symbol: str, score: float, updated_at: float):
+        """Lưu hoặc cập nhật điểm số AI của một mã cổ phiếu lên Supabase."""
+        def _save():
+            try:
+                data = {
+                    "symbol": symbol.upper(),
+                    "score": float(score),
+                    "updated_at": float(updated_at)
+                }
+                # Dùng upsert: Cập nhật nếu symbol đã có, tạo mới nếu chưa
+                supabase.table("ai_sentiments").upsert(data, on_conflict="symbol").execute()
+            except Exception as e:
+                print(f"⚠️ Lỗi lưu AI Sentiment lên Supabase cho {symbol}: {e}")
+        await asyncio.to_thread(_save)
+
+    async def load_all_sentiments(self) -> dict:
+        """Tải toàn bộ điểm AI từ Supabase lên RAM khi khởi động server."""
+        def _get():
+            try:
+                res = supabase.table("ai_sentiments").select("*").execute()
+                sentiments = {}
+                if res.data:
+                    for row in res.data:
+                        sentiments[row["symbol"]] = {
+                            "score": float(row["score"]),
+                            "updated_at": float(row["updated_at"])
+                        }
+                return sentiments
+            except Exception as e:
+                print(f"⚠️ Lỗi đọc AI Sentiments từ Supabase: {e}")
+                return {}
+        return await asyncio.to_thread(_get)
+    
     async def get_all_user_watchlists(self) -> set[str]:
         """Lấy tất cả các mã cổ phiếu độc nhất từ tất cả người dùng."""
         def _get():

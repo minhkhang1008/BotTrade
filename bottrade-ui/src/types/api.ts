@@ -93,4 +93,9 @@ export interface SignalCheck {
   }
   analysis?: AnalysisDetails
   timestamp: string
+  // Scoring system fields
+  total_score?: number | null
+  tech_score?: number | null
+  ai_sentiment?: number | null
+  trigger_threshold?: number | null
 }

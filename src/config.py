@@ -65,6 +65,9 @@ class Settings(BaseSettings):
         alias="BACKTEST_POSITION_SIZE_PERCENT"
     )
     
+    # AI Model (OpenRouter model ID for news analysis)
+    ai_model: str = Field(default="google/gemini-2.0-flash-001", alias="AI_MODEL")
+
     # Telegram Notification Settings
     telegram_bot_token: str = Field(default="", alias="TELEGRAM_BOT_TOKEN")
     telegram_chat_id: str = Field(default="", alias="TELEGRAM_CHAT_ID")
